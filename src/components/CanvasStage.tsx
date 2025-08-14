@@ -293,7 +293,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
             </div>
             <div style={{ fontSize: 13, opacity: 0.8 }}>или перетащите файл/нажмите «Загрузить»</div>
             {showShortcuts && (
-              <div id="shortcuts-tooltip" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: '100%', marginTop: 10, padding: '10px 12px', background: 'rgba(20,20,20,0.95)', color: '#ddd', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.35)', width: 280, textAlign: 'left', zIndex: 10 }}>
+              <div id="shortcuts-tooltip" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: '100%', marginTop: 10, padding: '10px 12px', background: 'rgba(20,20,20,0.95)', color: '#ddd', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.35)', width: 280, textAlign: 'left', zIndex: 1000 }}>
                 <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Горячие клавиши</div>
                 <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
                   <li><b>S</b> — Выбор (Select)</li>

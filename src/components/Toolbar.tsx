@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useState, useEffect } from 'react'
 import type { Tool } from '../state/editorStore'
 import { useEditorStore } from '../state/editorStore'
 import { IconSelect } from './icons/IconSelect'
@@ -20,6 +20,19 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
   const mosaicBlockSize = useEditorStore(s => s.mosaicBlockSize)
   const setMosaicBlockSize = useEditorStore(s => s.setMosaicBlockSize)
 
+  const [showTips, setShowTips] = useState(false)
+  useEffect(() => {
+    if (!showTips) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowTips(false) }
+    const onClick = (e: MouseEvent) => {
+      const box = document.getElementById('toolbar-shortcuts-tip')
+      if (box && !box.contains(e.target as Node)) setShowTips(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mousedown', onClick)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick) }
+  }, [showTips])
+
   const tools: Array<{ key: Tool; title: string; render: () => any }> = [
     { key: 'select', title: 'Выбор', render: () => <IconSelect /> },
     { key: 'rect', title: 'Рамка', render: () => <IconRect /> },
@@ -33,7 +46,9 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
       alignItems: 'center',
       gap: 8,
       padding: '12px 16px',
-      borderBottom: '1px solid rgba(128,128,128,0.2)'
+      borderBottom: '1px solid rgba(128,128,128,0.2)',
+      position: 'relative',
+      zIndex: 30,
     }}>
       <button
         onClick={onUpload}
@@ -79,8 +94,29 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
         <span style={{ fontSize: 12, opacity: 0.8 }}>Мозаика</span>
         <input type="range" min={4} max={48} value={mosaicBlockSize} onChange={e => setMosaicBlockSize(Number(e.target.value))} />
       </label>
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
         <span style={{ opacity: 0.7, fontSize: 12 }}>Вставьте скриншот: ⌘/Ctrl+V</span>
+        <button
+          onClick={() => setShowTips(s => !s)}
+          title="Горячие клавиши"
+          style={{ width: 32, height: 32, borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+        >?
+        </button>
+        {showTips && (
+          <div id="toolbar-shortcuts-tip" style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', padding: '10px 12px', background: 'rgba(20,20,20,0.95)', color: '#ddd', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.35)', width: 280, zIndex: 999 }}>
+            <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Горячие клавиши</div>
+            <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
+              <li><b>S</b> — Выбор (Select)</li>
+              <li><b>A</b> — Стрелка</li>
+              <li><b>R</b> — Рамка</li>
+              <li><b>M</b> — Мозаика</li>
+              <li><b>⌘/Ctrl+Z</b> — Отменить</li>
+              <li><b>⌘/Ctrl+Shift+Z</b> или <b>Ctrl+Y</b> — Повторить</li>
+              <li><b>Delete/Backspace</b> — Удалить выбранный</li>
+            </ul>
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>Подсказка: клик по элементу — выделение; повторный клик и перетаскивание — перемещение.</div>
+          </div>
+        )}
       </div>
     </div>
   )
