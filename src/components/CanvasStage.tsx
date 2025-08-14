@@ -121,23 +121,39 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     return { scale, offsetX, offsetY, stageFromImage, imageFromStage }
   }, [img, size.width, size.height])
 
+  // distance from point to segment
+  const distToSeg = (ax:number, ay:number, bx:number, by:number, px:number, py:number) => {
+    const A = px - ax, B = py - ay, C = bx - ax, D = by - ay
+    const len_sq = C*C + D*D || 1
+    let t = (A*C + B*D) / len_sq
+    t = Math.max(0, Math.min(1, t))
+    const xx = ax + C*t, yy = ay + D*t
+    return Math.hypot(px-xx, py-yy)
+  }
+
+  // distance from point to quadratic Bezier (sampled polyline)
+  const distToQuad = (start:{x:number;y:number}, control:{x:number;y:number}, end:{x:number;y:number}, p:{x:number;y:number}) => {
+    const segments = 28
+    let min = Infinity
+    let prev = start
+    for (let i = 1; i <= segments; i++) {
+      const t = i / segments
+      const x = (1 - t) * (1 - t) * start.x + 2 * (1 - t) * t * control.x + t * t * end.x
+      const y = (1 - t) * (1 - t) * start.y + 2 * (1 - t) * t * control.y + t * t * end.y
+      const d = distToSeg(prev.x, prev.y, x, y, p.x, p.y)
+      if (d < min) min = d
+      prev = { x, y }
+    }
+    return min
+  }
+
   const pickObjectAt = (pImg: { x: number; y: number }) => {
-    // hit-test: check arrows (distance to curve endpoints), rects (bounds), mosaic (bounds), last-on-top
+    // hit-test: check arrows (distance to curve), rects/mosaic by bounds, last-on-top
     for (let i = objects.length - 1; i >= 0; i--) {
       const o = objects[i]
       if (o.type === 'arrow') {
-        // simple: near line segment start-end or near control
-        const d = (ax:number, ay:number, bx:number, by:number, px:number, py:number) => {
-          const A = px - ax, B = py - ay, C = bx - ax, D = by - ay
-          const dot = A*C + B*D
-          const len_sq = C*C + D*D || 1
-          let t = dot / len_sq
-          t = Math.max(0, Math.min(1, t))
-          const xx = ax + C*t, yy = ay + D*t
-          return Math.hypot(px-xx, py-yy)
-        }
-        const near = d(o.start.x, o.start.y, o.end.x, o.end.y, pImg.x, pImg.y) < 8 || Math.hypot(pImg.x - o.control.x, pImg.y - o.control.y) < 8
-        if (near) return o
+        const nearCurve = distToQuad(o.start, o.control, o.end, pImg) < 8
+        if (nearCurve) return o
       } else {
         const within = pImg.x >= (o as any).x && pImg.x <= (o as any).x + (o as any).width && pImg.y >= (o as any).y && pImg.y <= (o as any).y + (o as any).height
         if (within) return o
