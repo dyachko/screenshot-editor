@@ -35,6 +35,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const setTool = useEditorStore(s => s.setTool)
   const logObjectChange = useEditorStore(s => s.logObjectChange)
 
+  const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
+
   // drag session for moving whole objects
   const dragRef = useRef<null | {
     id: string
@@ -166,13 +168,13 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
             control: { x: origin.control.x + dx, y: origin.control.y + dy },
           } as any)
         }
-        if (containerRef.current) containerRef.current.style.cursor = 'move'
+        setCursor('move')
         return
       }
       if (dragRef.current && kind === 'up') {
         const { id } = dragRef.current
         dragRef.current = null
-        if (containerRef.current) containerRef.current.style.cursor = 'default'
+        setCursor('default')
         // log change for per-object history
         logObjectChange(id, 'Изменено')
         return
@@ -189,7 +191,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
             if (hit.type === 'arrow') beginArrowEdit(hit.id)
           } else if (!isHandle) {
             // start drag for whole object
-            if (containerRef.current) containerRef.current.style.cursor = 'move'
+            setCursor('move')
             const origin = hit.type === 'arrow' ? { start: { ...(hit as any).start }, end: { ...(hit as any).end }, control: { ...(hit as any).control } } : { x: (hit as any).x, y: (hit as any).y }
             dragRef.current = { id: hit.id, type: hit.type as any, startImg: p, origin }
           }
@@ -197,17 +199,20 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           // click on empty space → deselect
           selectObject(null)
           exitArrowEdit()
-          if (containerRef.current) containerRef.current.style.cursor = 'default'
+          setCursor('default')
         }
         return
       }
 
-      // hover cursor feedback (optional minimal)
+      // hover cursor feedback (skip if over handle)
       if (kind === 'move') {
+        const target = e.target
+        const isHandle = target.getClassName?.() === 'Circle'
+        if (isHandle) return
         const hit = selectedId ? objects.find(o => o.id === selectedId) : null
         if (!hit) return
         const over = !!pickObjectAt(p)
-        if (containerRef.current) containerRef.current.style.cursor = over ? 'move' : 'default'
+        setCursor(over ? 'move' : 'default')
       }
       return
     }
@@ -348,11 +353,14 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                   {isEditing && (
                     <>
                       <KCircle key={obj.id+'-hs'} x={s.x} y={s.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('start')} onDragEnd={handleUp} onPointerDown={handleDown} />
+                        draggable onDragStart={handleDown} onDragMove={handleDrag('start')} onDragEnd={handleUp} onPointerDown={handleDown}
+                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
                       <KCircle key={obj.id+'-hc'} x={m.x} y={m.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('control')} onDragEnd={handleUp} onPointerDown={handleDown} />
+                        draggable onDragStart={handleDown} onDragMove={handleDrag('control')} onDragEnd={handleUp} onPointerDown={handleDown}
+                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
                       <KCircle key={obj.id+'-he'} x={e.x} y={e.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('end')} onDragEnd={handleUp} onPointerDown={handleDown} />
+                        draggable onDragStart={handleDown} onDragMove={handleDrag('end')} onDragEnd={handleUp} onPointerDown={handleDown}
+                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
                     </>
                   )}
                 </>
@@ -365,14 +373,18 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
               const tr = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y })
               const bl = layout.stageFromImage({ x: obj.x, y: obj.y + obj.height })
               const br = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y + obj.height })
-              const r = 6
+              const r = 8
               return (
                 <>
                   <KRect x={tl.x} y={tl.y} width={obj.width * layout.scale} height={obj.height * layout.scale} stroke="#F99761" strokeWidth={1} dash={[6,4]} listening={false} />
-                  <KCircle x={tl.x} y={tl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')} />
-                  <KCircle x={tr.x} y={tr.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tr')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')} />
-                  <KCircle x={bl.x} y={bl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'bl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')} />
-                  <KCircle x={br.x} y={br.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'br')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')} />
+                  <KCircle x={tl.x} y={tl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
+                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
+                  <KCircle x={tr.x} y={tr.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tr')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
+                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
+                  <KCircle x={bl.x} y={bl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'bl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
+                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
+                  <KCircle x={br.x} y={br.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'br')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
+                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
                 </>
               )
             })}
