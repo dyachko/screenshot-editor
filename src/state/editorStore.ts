@@ -134,6 +134,9 @@ export interface EditorState {
 	viewOffsetX: number
 	viewOffsetY: number
 	setViewOffset: (x: number, y: number) => void
+	// stage ref for exact export
+	stageRef: any | null
+	setStageRef: (stage: any | null) => void
 }
 
 function uid() {
@@ -461,4 +464,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 	viewOffsetX: 0,
 	viewOffsetY: 0,
 	setViewOffset: (x, y) => set({ viewOffsetX: x, viewOffsetY: y }),
+	stageRef: null,
+	setStageRef: (stage) => set({ stageRef: stage }),
 })) 

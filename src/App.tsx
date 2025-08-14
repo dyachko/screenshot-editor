@@ -67,6 +67,21 @@ function App() {
 
   const handleExport = useCallback(async () => {
     if (!activeScene) return
+    const stage = useEditorStore.getState().stageRef
+    if (stage) {
+      // exact stage snapshot
+      const dataUrl = stage.toDataURL({ pixelRatio: 1 })
+      const blob = await (await fetch(dataUrl)).blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'screenshot.png'
+      document.body.appendChild(a)
+      a.click()
+      URL.revokeObjectURL(a.href)
+      document.body.removeChild(a)
+      return
+    }
+    // fallback
     const img = new Image()
     img.crossOrigin = 'anonymous'
     const done = new Promise<HTMLImageElement>((resolve, reject) => {
@@ -83,6 +98,14 @@ function App() {
 
   const handleCopy = useCallback(async (): Promise<boolean> => {
     try {
+      const stage = useEditorStore.getState().stageRef
+      if (stage) {
+        const dataUrl = stage.toDataURL({ pixelRatio: 1 })
+        const blob = await (await fetch(dataUrl)).blob()
+        const item = new ClipboardItem({ 'image/png': blob })
+        await navigator.clipboard.write([item])
+        return true
+      }
       const scene = activeScene
       if (!scene) return false
       const img = new Image(); img.crossOrigin = 'anonymous'
@@ -110,9 +133,7 @@ function App() {
             for (let cIdx = 0; cIdx < cols; cIdx++) {
               const px = sx + cIdx * blockSize
               const py = sy + rIdx * blockSize
-              const cx = Math.min(src.width - 1, Math.max(0, Math.floor(px + blockSize / 2)))
-              const cy = Math.min(src.height - 1, Math.max(0, Math.floor(py + blockSize / 2)))
-              const data = srcCtx.getImageData(cx, cy, 1, 1).data
+              const data = srcCtx.getImageData(Math.min(src.width - 1, Math.max(0, Math.floor(px))), Math.min(src.height - 1, Math.max(0, Math.floor(py))), 1, 1).data
               const a = data[3] / 255
               ctx.fillStyle = `rgba(${data[0]},${data[1]},${data[2]},${a})`
               ctx.fillRect(px, py, blockSize, blockSize)
@@ -157,7 +178,7 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.4</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.5</div>
       </div>
       <BottomActions onExport={handleExport} onCopy={handleCopy} />
     </div>

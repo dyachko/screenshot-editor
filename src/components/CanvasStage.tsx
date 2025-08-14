@@ -37,6 +37,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const logObjectChange = useEditorStore(s => s.logObjectChange)
   const setViewScale = useEditorStore(s => s.setViewScale)
   const setViewOffset = useEditorStore(s => s.setViewOffset)
+  const setStageRef = useEditorStore(s => s.setStageRef)
 
   const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
 
@@ -141,6 +142,9 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     if (layout) setViewScale(layout.scale)
     if (layout) setViewOffset(layout.offsetX, layout.offsetY)
   }, [layout, setViewScale, setViewOffset])
+
+  // register stage ref
+  const stageRefCb = (stage: any) => setStageRef(stage)
 
   // distance from point to segment
   const distToSeg = (ax:number, ay:number, bx:number, by:number, px:number, py:number) => {
@@ -319,6 +323,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
       )}
       {size.width > 0 && size.height > 0 && (
         <Stage
+          ref={stageRefCb}
           width={size.width}
           height={size.height}
           onPointerDown={(e) => handlePointer(e, 'down')}
