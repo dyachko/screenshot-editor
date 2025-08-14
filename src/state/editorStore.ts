@@ -128,6 +128,12 @@ export interface EditorState {
 	updateObjectLive: (id: string, changes: Partial<any>) => void
 	hydrate: () => Promise<void>
 	removeSelected: () => void
+	// view scale (stage/image scale factor used for pixelate parity)
+	viewScale: number
+	setViewScale: (s: number) => void
+	viewOffsetX: number
+	viewOffsetY: number
+	setViewOffset: (x: number, y: number) => void
 }
 
 function uid() {
@@ -450,4 +456,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		get().applyChange({ id: uid(), label: 'Удалено', op: { type: 'remove', id: selectedId } })
 		set({ selectedId: null, editingArrowId: null, editingArrowOriginal: null })
 	},
+	viewScale: 1,
+	setViewScale: (s) => set({ viewScale: s }),
+	viewOffsetX: 0,
+	viewOffsetY: 0,
+	setViewOffset: (x, y) => set({ viewOffsetX: x, viewOffsetY: y }),
 })) 

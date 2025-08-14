@@ -35,6 +35,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const updateObjectLive = useEditorStore(s => s.updateObjectLive)
   const setTool = useEditorStore(s => s.setTool)
   const logObjectChange = useEditorStore(s => s.logObjectChange)
+  const setViewScale = useEditorStore(s => s.setViewScale)
+  const setViewOffset = useEditorStore(s => s.setViewOffset)
 
   const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
 
@@ -134,6 +136,11 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     const imageFromStage = (p: { x: number; y: number }) => ({ x: (p.x - offsetX) / scale, y: (p.y - offsetY) / scale })
     return { scale, offsetX, offsetY, stageFromImage, imageFromStage }
   }, [img, size.width, size.height])
+
+  useEffect(() => {
+    if (layout) setViewScale(layout.scale)
+    if (layout) setViewOffset(layout.offsetX, layout.offsetY)
+  }, [layout, setViewScale, setViewOffset])
 
   // distance from point to segment
   const distToSeg = (ax:number, ay:number, bx:number, by:number, px:number, py:number) => {

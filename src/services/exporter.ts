@@ -31,30 +31,63 @@ function drawRectOutline(ctx: Ctx2D, obj: RectObject) {
 	ctx.restore()
 }
 
-function applyMosaic(ctx: Ctx2D, img: HTMLImageElement, r: MosaicObject) {
+function applyMosaicFromSource(ctx: Ctx2D, srcCtx: OffscreenCanvasRenderingContext2D, r: MosaicObject, stageScale: number, offsetX: number, offsetY: number) {
 	const { x, y, width, height, blockSize } = r
-	const w = Math.max(1, Math.floor(width / blockSize))
-	const h = Math.max(1, Math.floor(height / blockSize))
-	const tmp = new OffscreenCanvas(w, h)
-	const tctx = tmp.getContext('2d') as OffscreenCanvasRenderingContext2D
-	tctx.imageSmoothingEnabled = false
-	tctx.drawImage(img, x, y, width, height, 0, 0, w, h)
-	ctx.imageSmoothingEnabled = false
-	;(ctx as any).drawImage(tmp as any, 0, 0, w, h, x, y, width, height)
+	// Align blocks to grid anchored at (0,0)
+	const anchorX = ((x % blockSize) + blockSize) % blockSize
+	const anchorY = ((y % blockSize) + blockSize) % blockSize
+	const sx = x - anchorX
+	const sy = y - anchorY
+	const sw = width + anchorX
+	const sh = height + anchorY
+	const cols = Math.max(1, Math.round(sw / blockSize))
+	const rows = Math.max(1, Math.round(sh / blockSize))
+
+	;(ctx as CanvasRenderingContext2D).save()
+	;(ctx as CanvasRenderingContext2D).beginPath()
+	;(ctx as CanvasRenderingContext2D).rect(x, y, width, height)
+	;(ctx as CanvasRenderingContext2D).clip()
+
+	for (let rIdx = 0; rIdx < rows; rIdx++) {
+		for (let cIdx = 0; cIdx < cols; cIdx++) {
+			const px = sx + cIdx * blockSize
+			const py = sy + rIdx * blockSize
+			// account for stage translation before scaling (match on-screen: src pixel at (offset + px*scale))
+			const cx = Math.floor((offsetX + px * stageScale))
+			const cy = Math.floor((offsetY + py * stageScale))
+			const ix = Math.min(srcCtx.canvas.width - 1, Math.max(0, cx))
+			const iy = Math.min(srcCtx.canvas.height - 1, Math.max(0, cy))
+			const data = srcCtx.getImageData(ix, iy, 1, 1).data
+			const a = data[3] / 255
+			;(ctx as CanvasRenderingContext2D).fillStyle = `rgba(${data[0]},${data[1]},${data[2]},${a})`
+			;(ctx as CanvasRenderingContext2D).fillRect(px, py, blockSize, blockSize)
+		}
+	}
+	;(ctx as CanvasRenderingContext2D).restore()
 }
 
 export async function exportScenePNG(params: {
 	image: HTMLImageElement,
 	objects: SceneObject[],
 	filename?: string,
+	stageScale?: number,
+	offsetX?: number,
+	offsetY?: number,
 }): Promise<Blob> {
-	const { image, objects, filename } = params
+	const { image, objects, filename, stageScale = 1, offsetX = 0, offsetY = 0 } = params
 	const canvas = new OffscreenCanvas(image.naturalWidth, image.naturalHeight)
 	const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D
 	ctx.imageSmoothingEnabled = true
 	ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight)
+	// source context for sampling (scaled to stage scale)
+	const sw = Math.max(1, Math.round(image.naturalWidth * stageScale))
+	const sh = Math.max(1, Math.round(image.naturalHeight * stageScale))
+	const src = new OffscreenCanvas(sw, sh)
+	const srcCtx = src.getContext('2d') as OffscreenCanvasRenderingContext2D
+	srcCtx.imageSmoothingEnabled = true
+	srcCtx.drawImage(image, 0, 0, sw, sh)
 	for (const obj of objects) {
-		if (obj.type === 'mosaic') applyMosaic(ctx, image, obj)
+		if (obj.type === 'mosaic') applyMosaicFromSource(ctx, srcCtx, obj, stageScale, offsetX, offsetY)
 	}
 	for (const obj of objects) {
 		if (obj.type === 'rect') drawRectOutline(ctx, obj)

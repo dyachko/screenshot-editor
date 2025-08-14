@@ -76,7 +76,9 @@ function App() {
     img.src = activeScene.imageUrl
     const loaded = await done
     const objects = useEditorStore.getState().objects
-    await exportScenePNG({ image: loaded, objects, filename: 'screenshot.png' })
+    const stageScale = useEditorStore.getState().viewScale
+    const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
+    await exportScenePNG({ image: loaded, objects, filename: 'screenshot.png', stageScale, offsetX: viewOffsetX, offsetY: viewOffsetY })
   }, [activeScene])
 
   const handleCopy = useCallback(async (): Promise<boolean> => {
@@ -91,14 +93,32 @@ function App() {
       const state = useEditorStore.getState()
       for (const obj of state.objects) {
         if (obj.type === 'mosaic') {
-          const w = Math.max(1, Math.floor(obj.width / obj.blockSize))
-          const h = Math.max(1, Math.floor(obj.height / obj.blockSize))
-          const tmp = new OffscreenCanvas(w, h)
-          const tctx = tmp.getContext('2d')!
-          tctx.imageSmoothingEnabled = false
-          tctx.drawImage(img, obj.x, obj.y, obj.width, obj.height, 0, 0, w, h)
-          ctx.imageSmoothingEnabled = false
-          ;(ctx as any).drawImage(tmp as any, 0, 0, w, h, obj.x, obj.y, obj.width, obj.height)
+          const { x, y, width, height, blockSize } = obj
+          const anchorX = ((x % blockSize) + blockSize) % blockSize
+          const anchorY = ((y % blockSize) + blockSize) % blockSize
+          const sx = x - anchorX
+          const sy = y - anchorY
+          const sw = width + anchorX
+          const sh = height + anchorY
+          const cols = Math.max(1, Math.round(sw / blockSize))
+          const rows = Math.max(1, Math.round(sh / blockSize))
+          const src = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+          const srcCtx = src.getContext('2d')!
+          srcCtx.drawImage(img, 0, 0)
+          ctx.save(); ctx.beginPath(); ctx.rect(x, y, width, height); ctx.clip()
+          for (let rIdx = 0; rIdx < rows; rIdx++) {
+            for (let cIdx = 0; cIdx < cols; cIdx++) {
+              const px = sx + cIdx * blockSize
+              const py = sy + rIdx * blockSize
+              const cx = Math.min(src.width - 1, Math.max(0, Math.floor(px + blockSize / 2)))
+              const cy = Math.min(src.height - 1, Math.max(0, Math.floor(py + blockSize / 2)))
+              const data = srcCtx.getImageData(cx, cy, 1, 1).data
+              const a = data[3] / 255
+              ctx.fillStyle = `rgba(${data[0]},${data[1]},${data[2]},${a})`
+              ctx.fillRect(px, py, blockSize, blockSize)
+            }
+          }
+          ctx.restore()
         }
       }
       ctx.imageSmoothingEnabled = true
@@ -137,7 +157,7 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.3</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.4</div>
       </div>
       <BottomActions onExport={handleExport} onCopy={handleCopy} />
     </div>
