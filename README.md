@@ -1,69 +1,46 @@
-# React + TypeScript + Vite
+# Screenshot Editor
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Простой веб‑сервис для маркировки скриншотов с минимальным, но полезным набором инструментов. Всё работает локально, без сервера: изображения и сцены сохраняются в браузере (IndexedDB).
 
-Currently, two official plugins are available:
+## Возможности
+- Добавление изображения: вставка из буфера (⌘/Ctrl+V) или загрузка файла
+- Инструменты:
+  - Рамка (прямоугольная обводка)
+  - Стрелка (кривая с редактируемыми узлами)
+  - Мозаика (пикселизация области)
+- История по объектам: у каждого элемента свои кнопки Undo/Redo
+- Экспорт в PNG без потери качества и копирование в буфер обмена
+- Несколько сцен (последние изображения) с локальным сохранением
+- Полностью клиентская обработка (без отправки данных на сервер)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Горячие клавиши
+- S — Выбор
+- R — Рамка
+- A — Стрелка
+- M — Мозаика
+- ⌘/Ctrl+Z — Отменить, ⌘/Ctrl+Shift+Z (или Ctrl+Y в Windows) — Повторить
+- Delete/Backspace — Удалить выбранный объект
 
-## Expanding the ESLint configuration
+## Технологии
+- React + TypeScript + Vite
+- Konva / react‑konva для канваса и фигур
+- Zustand для состояния и истории
+- IndexedDB (idb-keyval) для локального сохранения сцен
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Запуск локально
+```bash
+npm ci
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Сборка
+```bash
+npm run build
 ```
+Собранные файлы — в `dist/`.
+
+## Деплой на GitHub Pages
+В репозитории настроен workflow GitHub Actions. Для кастомного домена установите переменную репозитория `CUSTOM_DOMAIN` (например, `screen.evgeni.co`) — workflow создаст `CNAME` и выставит базовый путь `/`.
+
+## Приватность
+Все операции выполняются в вашем браузере. Изображения не покидают устройство.
