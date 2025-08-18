@@ -14,8 +14,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [img] = useImage(imageUrl ?? '', 'anonymous')
-  const [showShortcuts, setShowShortcuts] = useState(false)
-
+  
   const objects = useEditorStore(s => s.objects)
   const draft = useEditorStore(s => s.drawingDraft)
   const startDrawing = useEditorStore(s => s.startDrawing)
@@ -25,11 +24,9 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const selectedId = useEditorStore(s => s.selectedId)
   const selectObject = useEditorStore(s => s.selectObject)
   const beginArrowEdit = useEditorStore(s => s.beginArrowEdit)
-  const finishArrowEdit = useEditorStore(s => s.finishArrowEdit)
   const updateArrowLive = useEditorStore(s => s.updateArrowLive)
   const undo = useEditorStore(s => s.undo)
   const redo = useEditorStore(s => s.redo)
-  const editingArrowId = useEditorStore(s => s.editingArrowId)
   const exitArrowEdit = useEditorStore(s => s.exitArrowEdit)
   const removeSelected = useEditorStore(s => s.removeSelected)
   const updateObjectLive = useEditorStore(s => s.updateObjectLive)
@@ -48,19 +45,6 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     startImg: { x: number; y: number }
     origin: any
   }>(null)
-
-  useEffect(() => {
-    if (!showShortcuts) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowShortcuts(false) }
-    const onClick = (e: MouseEvent) => {
-      // close if clicked outside of tooltip box
-      const box = document.getElementById('shortcuts-tooltip')
-      if (box && !box.contains(e.target as Node)) setShowShortcuts(false)
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('mousedown', onClick)
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick) }
-  }, [showShortcuts])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -296,28 +280,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           <div style={{ textAlign: 'center', position: 'relative' }}>
             <div style={{ fontSize: 18, marginBottom: 8 }}>
               Вставьте скриншот (⌘/Ctrl+V)
-              <button
-                onClick={() => setShowShortcuts(s => !s)}
-                style={{ marginLeft: 12, background: 'transparent', color: '#60a5fa', border: 'none', cursor: 'pointer', fontSize: 14, textDecoration: 'underline' }}
-                title="Показать горячие клавиши"
-              >Шоткаты</button>
             </div>
             <div style={{ fontSize: 13, opacity: 0.8 }}>или перетащите файл/нажмите «Загрузить»</div>
-            {showShortcuts && (
-              <div id="shortcuts-tooltip" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: '100%', marginTop: 10, padding: '10px 12px', background: 'rgba(20,20,20,0.95)', color: '#ddd', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.35)', width: 280, textAlign: 'left', zIndex: 1000 }}>
-                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Горячие клавиши</div>
-                <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
-                  <li><b>S</b> — Выбор (Select)</li>
-                  <li><b>A</b> — Стрелка</li>
-                  <li><b>R</b> — Рамка</li>
-                  <li><b>M</b> — Мозаика</li>
-                  <li><b>⌘/Ctrl+Z</b> — Отменить</li>
-                  <li><b>⌘/Ctrl+Shift+Z</b> или <b>Ctrl+Y</b> — Повторить</li>
-                  <li><b>Delete/Backspace</b> — Удалить выбранный</li>
-                </ul>
-                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>Подсказка: клик по элементу — выделение; повторный клик и перетаскивание — перемещение.</div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -398,59 +362,50 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                 const pnx = -pdy / plen
                 const pny = pdx / plen
                 const kOld = (latest.control.x - prevMid.x) * pnx + (latest.control.y - prevMid.y) * pny
-                const newS = kind === 'start' ? p : prevS
-                const newE = kind === 'end' ? p : prevE
-                const newMid = { x: (newS.x + newE.x) / 2, y: (newS.y + newE.y) / 2 }
-                const ndx = newE.x - newS.x
-                const ndy = newE.y - newS.y
-                const nlen = Math.hypot(ndx, ndy) || 1
-                const nnx = -ndy / nlen
-                const nny = ndx / nlen
-                const newControl = { x: newMid.x + nnx * kOld, y: newMid.y + nny * kOld }
-                updateArrowLive(obj.id, { start: newS, end: newE, control: newControl } as any)
+                if (kind === 'start') {
+                  const newStart = p
+                  const newMid = { x: (newStart.x + latest.end.x) / 2, y: (newStart.y + latest.end.y) / 2 }
+                  const newControl = { x: newMid.x + pnx * kOld, y: newMid.y + pny * kOld }
+                  updateArrowLive(obj.id, { start: newStart, control: newControl })
+                } else if (kind === 'end') {
+                  const newEnd = p
+                  const newMid = { x: (latest.start.x + newEnd.x) / 2, y: (latest.start.y + newEnd.y) / 2 }
+                  const newControl = { x: newMid.x + pnx * kOld, y: newMid.y + pny * kOld }
+                  updateArrowLive(obj.id, { end: newEnd, control: newControl })
+                }
               }
-              const handleDown = () => { selectObject(obj.id); beginArrowEdit(obj.id) }
-              const handleUp = () => finishArrowEdit(obj.id)
-              const isEditing = editingArrowId === obj.id || selectedId === obj.id
               return (
                 <>
-                  {isEditing && (
-                    <>
-                      <KCircle key={obj.id+'-hs'} x={s.x} y={s.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('start')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                      <KCircle key={obj.id+'-hc'} x={m.x} y={m.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('control')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                      <KCircle key={obj.id+'-he'} x={e.x} y={e.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('end')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                    </>
-                  )}
+                  <KCircle x={s.x} y={s.y} radius={6} fill="#F99761" stroke="#fff" strokeWidth={1} draggable onDragMove={handleDrag('start')} onMouseEnter={() => setCursor('pointer')} onMouseLeave={() => setCursor('default')} />
+                  <KCircle x={m.x} y={m.y} radius={6} fill="#F99761" stroke="#fff" strokeWidth={1} draggable onDragMove={handleDrag('control')} onMouseEnter={() => setCursor('pointer')} onMouseLeave={() => setCursor('default')} />
+                  <KCircle x={e.x} y={e.y} radius={6} fill="#F99761" stroke="#fff" strokeWidth={1} draggable onDragMove={handleDrag('end')} onMouseEnter={() => setCursor('pointer')} onMouseLeave={() => setCursor('default')} />
                 </>
               )
             })}
             {img && layout && objects.map(obj => {
-              if (obj.type !== 'rect' && obj.type !== 'mosaic') return null
-              if (selectedId !== obj.id) return null
-              const tl = layout.stageFromImage({ x: obj.x, y: obj.y })
-              const tr = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y })
-              const bl = layout.stageFromImage({ x: obj.x, y: obj.y + obj.height })
-              const br = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y + obj.height })
-              const r = 8
-              return (
-                <>
-                  <KRect x={tl.x} y={tl.y} width={obj.width * layout.scale} height={obj.height * layout.scale} stroke="#F99761" strokeWidth={1} dash={[6,4]} listening={false} />
-                  <KCircle x={tl.x} y={tl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={tr.x} y={tr.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tr')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={bl.x} y={bl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'bl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={br.x} y={br.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'br')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                </>
-              )
+              if (obj.type === 'rect' || obj.type === 'mosaic') {
+                const tl = layout.stageFromImage({ x: obj.x, y: obj.y })
+                const br = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y + obj.height })
+                const x = tl.x, y = tl.y, w = br.x - tl.x, h = br.y - tl.y
+                const corner = (cx: number, cy: number, kind: 'tl'|'tr'|'bl'|'br') => (
+                  <KCircle
+                    x={cx} y={cy} radius={7} fill="#F99761" stroke="#fff" strokeWidth={1}
+                    onDragMove={handleDragRectCorner(obj, kind)} draggable
+                    hitStrokeWidth={18}
+                    onMouseEnter={() => setCursor((kind==='tl'||kind==='br')?'nwse-resize':'nesw-resize')}
+                    onMouseLeave={() => setCursor('default')}
+                  />
+                )
+                return (
+                  <>
+                    {corner(x, y, 'tl')}
+                    {corner(x + w, y, 'tr')}
+                    {corner(x, y + h, 'bl')}
+                    {corner(x + w, y + h, 'br')}
+                  </>
+                )
+              }
+              return null
             })}
           </Layer>
         </Stage>

@@ -13,6 +13,8 @@ function App() {
   const addScene = useEditorStore(s => s.addScene)
   const scenesCount = useEditorStore(s => s.scenes.length)
   const activeScene = useEditorStore(s => s.scenes.find(sc => sc.id === s.activeSceneId) ?? null)
+  const activeSceneId = useEditorStore(s => s.activeSceneId)
+  const deleteScene = useEditorStore(s => s.deleteScene)
   const hydrate = useEditorStore(s => s.hydrate)
 
   useEffect(() => {
@@ -164,6 +166,11 @@ function App() {
     } catch (e) { console.error(e); return false }
   }, [activeScene])
 
+  const handleDeleteActive = useCallback(() => {
+    if (!activeSceneId) return
+    if (confirm('Удалить изображение? Действие необратимо.')) deleteScene(activeSceneId)
+  }, [activeSceneId, deleteScene])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Toolbar onUpload={handleUploadClick} />
@@ -176,6 +183,13 @@ function App() {
       />
       <div style={{ flex: 1, minHeight: 0, position: 'relative', paddingLeft: scenesCount > 1 ? 220 : 0, paddingBottom: 88 }}>
         {scenesCount > 1 && <ScenesSidebar />}
+        {scenesCount === 1 && activeScene && (
+          <button
+            onClick={handleDeleteActive}
+            title="Удалить изображение"
+            style={{ position: 'absolute', right: 12, top: 12, width: 28, height: 28, borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.4)', color: '#eee', cursor: 'pointer' }}
+          >✕</button>
+        )}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
         <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.5</div>
