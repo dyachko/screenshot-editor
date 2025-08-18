@@ -14,7 +14,6 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [img] = useImage(imageUrl ?? '', 'anonymous')
-  const [showShortcuts, setShowShortcuts] = useState(false)
 
   const objects = useEditorStore(s => s.objects)
   const draft = useEditorStore(s => s.drawingDraft)
@@ -48,19 +47,6 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     startImg: { x: number; y: number }
     origin: any
   }>(null)
-
-  useEffect(() => {
-    if (!showShortcuts) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowShortcuts(false) }
-    const onClick = (e: MouseEvent) => {
-      // close if clicked outside of tooltip box
-      const box = document.getElementById('shortcuts-tooltip')
-      if (box && !box.contains(e.target as Node)) setShowShortcuts(false)
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('mousedown', onClick)
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick) }
-  }, [showShortcuts])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -296,28 +282,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           <div style={{ textAlign: 'center', position: 'relative' }}>
             <div style={{ fontSize: 18, marginBottom: 8 }}>
               Вставьте скриншот (⌘/Ctrl+V)
-              <button
-                onClick={() => setShowShortcuts(s => !s)}
-                style={{ marginLeft: 12, background: 'transparent', color: '#60a5fa', border: 'none', cursor: 'pointer', fontSize: 14, textDecoration: 'underline' }}
-                title="Показать горячие клавиши"
-              >Шоткаты</button>
             </div>
             <div style={{ fontSize: 13, opacity: 0.8 }}>или перетащите файл/нажмите «Загрузить»</div>
-            {showShortcuts && (
-              <div id="shortcuts-tooltip" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: '100%', marginTop: 10, padding: '10px 12px', background: 'rgba(20,20,20,0.95)', color: '#ddd', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,0.35)', width: 280, textAlign: 'left', zIndex: 1000 }}>
-                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Горячие клавиши</div>
-                <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
-                  <li><b>S</b> — Выбор (Select)</li>
-                  <li><b>A</b> — Стрелка</li>
-                  <li><b>R</b> — Рамка</li>
-                  <li><b>M</b> — Мозаика</li>
-                  <li><b>⌘/Ctrl+Z</b> — Отменить</li>
-                  <li><b>⌘/Ctrl+Shift+Z</b> или <b>Ctrl+Y</b> — Повторить</li>
-                  <li><b>Delete/Backspace</b> — Удалить выбранный</li>
-                </ul>
-                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>Подсказка: клик по элементу — выделение; повторный клик и перетаскивание — перемещение.</div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -376,7 +342,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
               if (obj.type !== 'arrow') return null
               const s = layout.stageFromImage(obj.start)
               const e = layout.stageFromImage(obj.end)
-              const m = layout.stageFromImage({ x: (obj.start.x + obj.end.x)/2, y: (obj.start.y + obj.end.y)/2 })
+              const c = layout.stageFromImage(obj.control)
               const handleDrag = (kind: 'start'|'control'|'end') => (evt: any) => {
                 const pos = evt.target.getStage().getPointerPosition()
                 if (!pos) return
@@ -419,7 +385,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                       <KCircle key={obj.id+'-hs'} x={s.x} y={s.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
                         draggable onDragStart={handleDown} onDragMove={handleDrag('start')} onDragEnd={handleUp} onPointerDown={handleDown}
                         onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                      <KCircle key={obj.id+'-hc'} x={m.x} y={m.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
+                      <KCircle key={obj.id+'-hc'} x={c.x} y={c.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
                         draggable onDragStart={handleDown} onDragMove={handleDrag('control')} onDragEnd={handleUp} onPointerDown={handleDown}
                         onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
                       <KCircle key={obj.id+'-he'} x={e.x} y={e.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
