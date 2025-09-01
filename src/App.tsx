@@ -69,8 +69,18 @@ function App() {
     if (!activeScene) return
     const stage = useEditorStore.getState().stageRef
     if (stage) {
-      // exact stage snapshot
-      const dataUrl = stage.toDataURL({ pixelRatio: 1 })
+      // export at original image resolution by cropping to image area and scaling up
+      const scale = useEditorStore.getState().viewScale || 1
+      const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
+      const iw = activeScene.imageNatural.width
+      const ih = activeScene.imageNatural.height
+      const dataUrl = stage.toDataURL({
+        x: viewOffsetX,
+        y: viewOffsetY,
+        width: iw * scale,
+        height: ih * scale,
+        pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
+      })
       const blob = await (await fetch(dataUrl)).blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -100,7 +110,20 @@ function App() {
     try {
       const stage = useEditorStore.getState().stageRef
       if (stage) {
-        const dataUrl = stage.toDataURL({ pixelRatio: 1 })
+        // copy at original image resolution by cropping to image area and scaling up
+        const scale = useEditorStore.getState().viewScale || 1
+        const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
+        const scene = activeScene
+        if (!scene) return false
+        const iw = scene.imageNatural.width
+        const ih = scene.imageNatural.height
+        const dataUrl = stage.toDataURL({
+          x: viewOffsetX,
+          y: viewOffsetY,
+          width: iw * scale,
+          height: ih * scale,
+          pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
+        })
         const blob = await (await fetch(dataUrl)).blob()
         const item = new ClipboardItem({ 'image/png': blob })
         await navigator.clipboard.write([item])
