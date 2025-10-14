@@ -12,7 +12,7 @@ export const ScenesSidebar = memo(() => {
   }
 
   return (
-    <div style={{ position: 'absolute', left: 0, top: 56, bottom: 0, width: 220, padding: 8, background: 'rgba(20,20,20,0.9)', borderRight: '1px solid rgba(255,255,255,0.08)', overflow: 'auto' }}>
+    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 220, padding: 8, paddingTop: 8, background: 'rgba(20,20,20,0.9)', borderRight: '1px solid rgba(255,255,255,0.08)', overflow: 'auto' }}>
       <div style={{ fontSize: 12, opacity: 0.7, padding: '4px 6px' }}>Изображения</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {scenes.map(s => (

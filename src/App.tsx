@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import JSZip from 'jszip'
 import './App.css'
 import { Toolbar } from './components/Toolbar'
 import { CanvasStage } from './components/CanvasStage'
@@ -199,6 +200,66 @@ function App() {
     await useEditorStore.getState().deleteAllScenes()
   }, [])
 
+  const handleExportAll = useCallback(async () => {
+    const state = useEditorStore.getState()
+    const scenes = state.scenes
+    if (scenes.length === 0) return
+    const zip = new JSZip()
+    const fmt = (n: number) => String(n).padStart(2, '0')
+    const now = new Date()
+    const stamp = `${now.getFullYear()}-${fmt(now.getMonth()+1)}-${fmt(now.getDate())}_${fmt(now.getHours())}-${fmt(now.getMinutes())}-${fmt(now.getSeconds())}`
+    const addPng = async (sceneId: string, blob: Blob) => {
+      zip.file(`${sceneId}.png`, blob)
+    }
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
+    const waitForSceneReady = async (sceneId: string) => {
+      for (let i = 0; i < 40; i++) { // up to ~2s
+        const st = useEditorStore.getState()
+        if (st.activeSceneId === sceneId && st.stageRef && (st.viewScale || 0) > 0) {
+          // give Konva a frame to draw
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+          return true
+        }
+        await sleep(50)
+      }
+      return false
+    }
+
+    const originalId = state.activeSceneId
+    for (const sc of scenes) {
+      state.switchScene(sc.id)
+      await waitForSceneReady(sc.id)
+      const st = useEditorStore.getState()
+      const stage = st.stageRef
+      if (stage) {
+        const scale = st.viewScale || 1
+        const { viewOffsetX, viewOffsetY } = st
+        const safarize = st.safarize
+        const iw = sc.imageNatural.width
+        const ih = sc.imageNatural.height
+        const topBar = safarize ? 40 : 0
+        const crop = safarize
+          ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
+          : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
+        const dataUrl = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+        const blob = await (await fetch(dataUrl)).blob()
+        await addPng(sc.id, blob)
+      } else {
+        const blob = await (await fetch(sc.imageUrl)).blob()
+        await addPng(sc.id, blob)
+      }
+    }
+    if (originalId) { state.switchScene(originalId); await new Promise(r => requestAnimationFrame(r)) }
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(zipBlob)
+    a.download = `screenshots_${stamp}.zip`
+    document.body.appendChild(a)
+    a.click()
+    URL.revokeObjectURL(a.href)
+    document.body.removeChild(a)
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Toolbar onUpload={handleUploadClick} />
@@ -214,9 +275,9 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.8</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v1.0.1</div>
       </div>
-      <BottomActions onExport={handleExport} onCopy={handleCopy} onDeleteAll={scenesCount > 0 ? deleteAllScenes : undefined} />
+      <BottomActions onExport={handleExport} onCopy={handleCopy} onExportAll={scenesCount > 0 ? handleExportAll : undefined} onDeleteAll={scenesCount > 0 ? deleteAllScenes : undefined} />
       </div>
   )
 }

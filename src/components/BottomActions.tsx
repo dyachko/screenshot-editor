@@ -4,9 +4,10 @@ interface BottomActionsProps {
   onExport: () => void | Promise<void>
   onCopy: () => Promise<boolean>
   onDeleteAll?: () => void | Promise<void>
+  onExportAll?: () => void | Promise<void>
 }
 
-export const BottomActions = memo(({ onExport, onCopy, onDeleteAll }: BottomActionsProps) => {
+export const BottomActions = memo(({ onExport, onCopy, onDeleteAll, onExportAll }: BottomActionsProps) => {
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -45,6 +46,16 @@ export const BottomActions = memo(({ onExport, onCopy, onDeleteAll }: BottomActi
         pointerEvents: 'auto',
         backdropFilter: 'blur(8px)'
       }}>
+        {onExportAll && (
+          <button onClick={onExportAll} style={{
+            padding: '10px 14px',
+            background: 'transparent',
+            color: '#22c55e',
+            border: 'none',
+            borderRight: '1px solid rgba(255,255,255,0.08)',
+            cursor: 'pointer'
+          }}>Экспорт всех</button>
+        )}
         {onDeleteAll && (
           <button onClick={onDeleteAll} style={{
             padding: '10px 14px',
