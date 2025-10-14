@@ -28,7 +28,7 @@ export const ScenesSidebar = memo(() => {
               <button title="Удалить" onClick={() => handleDelete(s.id)} style={{ fontSize: 12 }}>✕</button>
             </div>
             <button onClick={() => switchScene(s.id)} style={{ textAlign: 'left', cursor: 'pointer', padding: 0, borderRadius: 6, overflow: 'hidden', border: 'none', background: 'transparent' }}>
-              <div style={{ width: '100%', aspectRatio: '16/10', background: '#111' }} />
+              <img src={s.imageUrl} alt={s.title} style={{ width: '100%', display: 'block', background: '#111' }} />
             </button>
           </div>
         ))}
