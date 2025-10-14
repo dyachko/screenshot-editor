@@ -82,10 +82,16 @@ function App() {
       const crop = safarize
         ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
         : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
-      const dataUrl = stage.toDataURL({
-        ...crop,
-        pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
-      })
+      // retry a few times to avoid rare empty frames
+      const toDataUrlReliable = async () => {
+        for (let i = 0; i < 3; i++) {
+          const url = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+          if (url && url.startsWith('data:image')) return url
+          await new Promise(r => requestAnimationFrame(r))
+        }
+        return stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+      }
+      const dataUrl = await toDataUrlReliable()
       const blob = await (await fetch(dataUrl)).blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -127,10 +133,15 @@ function App() {
         const crop = safarize
           ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
           : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
-        const dataUrl = stage.toDataURL({
-          ...crop,
-          pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
-        })
+        const toDataUrlReliable = async () => {
+          for (let i = 0; i < 3; i++) {
+            const url = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+            if (url && url.startsWith('data:image')) return url
+            await new Promise(r => requestAnimationFrame(r))
+          }
+          return stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+        }
+        const dataUrl = await toDataUrlReliable()
         const blob = await (await fetch(dataUrl)).blob()
         const item = new ClipboardItem({ 'image/png': blob })
         await navigator.clipboard.write([item])
@@ -208,8 +219,11 @@ function App() {
     const fmt = (n: number) => String(n).padStart(2, '0')
     const now = new Date()
     const stamp = `${now.getFullYear()}-${fmt(now.getMonth()+1)}-${fmt(now.getDate())}_${fmt(now.getHours())}-${fmt(now.getMinutes())}-${fmt(now.getSeconds())}`
-    const addPng = async (sceneId: string, blob: Blob) => {
-      zip.file(`${sceneId}.png`, blob)
+    const digits = String(scenes.length).length
+    const pad = (n: number) => String(n).padStart(digits, '0')
+    const safe = (s: string) => s.replace(/\s+/g, ' ').trim()
+    const addPng = async (filename: string, blob: Blob) => {
+      zip.file(filename, blob)
     }
     const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
     const waitForSceneReady = async (sceneId: string) => {
@@ -226,11 +240,13 @@ function App() {
     }
 
     const originalId = state.activeSceneId
+    let index = 0
     for (const sc of scenes) {
       state.switchScene(sc.id)
       await waitForSceneReady(sc.id)
       const st = useEditorStore.getState()
       const stage = st.stageRef
+      const baseName = `${pad(++index)}_${safe(sc.title || sc.id)}`
       if (stage) {
         const scale = st.viewScale || 1
         const { viewOffsetX, viewOffsetY } = st
@@ -241,12 +257,20 @@ function App() {
         const crop = safarize
           ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
           : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
-        const dataUrl = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+        const toDataUrlReliable = async () => {
+          for (let i = 0; i < 3; i++) {
+            const url = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+            if (url && url.startsWith('data:image')) return url
+            await new Promise(r => requestAnimationFrame(r))
+          }
+          return stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
+        }
+        const dataUrl = await toDataUrlReliable()
         const blob = await (await fetch(dataUrl)).blob()
-        await addPng(sc.id, blob)
+        await addPng(`${baseName}.png`, blob)
       } else {
         const blob = await (await fetch(sc.imageUrl)).blob()
-        await addPng(sc.id, blob)
+        await addPng(`${baseName}.png`, blob)
       }
     }
     if (originalId) { state.switchScene(originalId); await new Promise(r => requestAnimationFrame(r)) }
@@ -275,7 +299,7 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v1.0.1</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v1.0.2</div>
       </div>
       <BottomActions onExport={handleExport} onCopy={handleCopy} onExportAll={scenesCount > 0 ? handleExportAll : undefined} onDeleteAll={scenesCount > 0 ? deleteAllScenes : undefined} />
       </div>
