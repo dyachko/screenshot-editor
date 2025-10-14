@@ -1,11 +1,12 @@
 import { memo, useState } from 'react'
 
 interface BottomActionsProps {
-  onExport: () => void
+  onExport: () => void | Promise<void>
   onCopy: () => Promise<boolean>
+  onDeleteAll?: () => void | Promise<void>
 }
 
-export const BottomActions = memo(({ onExport, onCopy }: BottomActionsProps) => {
+export const BottomActions = memo(({ onExport, onCopy, onDeleteAll }: BottomActionsProps) => {
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -44,6 +45,16 @@ export const BottomActions = memo(({ onExport, onCopy }: BottomActionsProps) => 
         pointerEvents: 'auto',
         backdropFilter: 'blur(8px)'
       }}>
+        {onDeleteAll && (
+          <button onClick={onDeleteAll} style={{
+            padding: '10px 14px',
+            background: 'transparent',
+            color: '#f87171',
+            border: 'none',
+            borderRight: '1px solid rgba(255,255,255,0.08)',
+            cursor: 'pointer'
+          }}>Delete All</button>
+        )}
         <button onClick={onExport} style={{
           padding: '10px 14px',
           background: '#3b82f6',
