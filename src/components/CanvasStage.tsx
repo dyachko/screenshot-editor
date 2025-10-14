@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Image as KonvaImage, Circle as KCircle, Rect as KRect } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Circle as KCircle, Rect as KRect, Line as KLine } from 'react-konva'
 import useImage from 'use-image'
 import { useEditorStore } from '../state/editorStore'
 import { ArrowShape } from './shapes/ArrowShape'
@@ -37,6 +37,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const setViewScale = useEditorStore(s => s.setViewScale)
   const setViewOffset = useEditorStore(s => s.setViewOffset)
   const setStageRef = useEditorStore(s => s.setStageRef)
+  const safarize = useEditorStore(s => s.safarize)
 
   const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
 
@@ -112,17 +113,25 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
 
   const layout = useMemo(() => {
     if (!img || size.width === 0 || size.height === 0) return null as null | {
-      scale: number; offsetX: number; offsetY: number; stageFromImage: (p: {x:number;y:number})=>{x:number;y:number}; imageFromStage: (p:{x:number;y:number})=>{x:number;y:number}
+      scale: number; offsetX: number; offsetY: number; topBarH: number; outer: number; winX: number; winY: number; winW: number; winH: number; stageFromImage: (p: {x:number;y:number})=>{x:number;y:number}; imageFromStage: (p:{x:number;y:number})=>{x:number;y:number}
     }
     const iw = img.naturalWidth
     const ih = img.naturalHeight
-    const scale = Math.min(size.width / iw, size.height / ih)
-    const offsetX = (size.width - iw * scale) / 2
-    const offsetY = (size.height - ih * scale) / 2
+    const topBarH = safarize ? 40 : 0
+    const outer = safarize ? 12 : 0 // margin outside the window
+    const scale = Math.min((size.width - outer * 2) / iw, (size.height - topBarH - outer * 2) / ih)
+    const compW = iw * scale
+    const compH = ih * scale + topBarH
+    const winX = (size.width - compW) / 2
+    const winY = (size.height - compH) / 2
+    const offsetX = winX
+    const offsetY = winY + topBarH
+    const winW = compW
+    const winH = compH
     const stageFromImage = (p: { x: number; y: number }) => ({ x: offsetX + p.x * scale, y: offsetY + p.y * scale })
     const imageFromStage = (p: { x: number; y: number }) => ({ x: (p.x - offsetX) / scale, y: (p.y - offsetY) / scale })
-    return { scale, offsetX, offsetY, stageFromImage, imageFromStage }
-  }, [img, size.width, size.height])
+    return { scale, offsetX, offsetY, topBarH, outer, winX, winY, winW, winH, stageFromImage, imageFromStage }
+  }, [img, size.width, size.height, safarize])
 
   useEffect(() => {
     if (layout) setViewScale(layout.scale)
@@ -297,8 +306,125 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           onPointerUp={(e) => handlePointer(e, 'up')}
         >
           <Layer>
+            {img && layout && safarize && (
+              // Shadowed outer window
+              <KRect
+                x={layout.winX}
+                y={layout.winY}
+                width={layout.winW}
+                height={layout.winH}
+                cornerRadius={12}
+                fill={'rgba(0,0,0,0.001)'}
+                shadowColor={'black'} shadowOpacity={0.25} shadowBlur={24} shadowOffset={{ x: 0, y: 8 }}
+                listening={false}
+              />
+            )}
+            {img && layout && safarize && (
+              // Safari-like frame overlay
+              <>
+                {/* Outer rounded border */}
+                <KRect
+                  x={layout.winX}
+                  y={layout.winY}
+                  width={layout.winW}
+                  height={layout.winH}
+                  cornerRadius={12}
+                  stroke={'rgba(255,255,255,0.35)'}
+                  strokeWidth={1}
+                  listening={false}
+                />
+                {/* Top toolbar */}
+                <KRect
+                  x={layout.winX}
+                  y={layout.winY}
+                  width={layout.winW}
+                  height={layout.topBarH}
+                  cornerRadius={[12,12,0,0] as any}
+                  fill={'rgba(243,244,246,0.95)'}
+                  listening={false}
+                />
+                {/* Nav segmented control (back/forward) */}
+                {(() => {
+                  const r = 6
+                  const gap = 10
+                  const lightsWidth = (r*2)*3 + gap*2
+                  const h = 24
+                  const w = 60
+                  const x = layout.winX + 16 + lightsWidth + 16 // ensure no overlap with traffic lights
+                  const y = layout.winY + (layout.topBarH - h) / 2
+                  const cy = layout.winY + layout.topBarH / 2
+                  const backCx = x + w * 0.25
+                  const fwdCx = x + w * 0.75
+                  const size = 7
+                  return (
+                    <>
+                      <KRect x={x} y={y} width={w} height={h} cornerRadius={12} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
+                      {/* back chevron "<" */}
+                      <KLine points={[backCx + 3, cy - size * 0.6, backCx - 3, cy, backCx + 3, cy + size * 0.6]} stroke={'rgba(0,0,0,0.7)'} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
+                      {/* forward chevron ">" */}
+                      <KLine points={[fwdCx - 3, cy - size * 0.6, fwdCx + 3, cy, fwdCx - 3, cy + size * 0.6]} stroke={'rgba(0,0,0,0.7)'} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
+                    </>
+                  )
+                })()}
+                {/* Traffic lights */}
+                {(() => {
+                  const top = layout.winY + 14
+                  const left = layout.winX + 16
+                  const r = 6
+                  const gap = 10
+                  return (
+                    <>
+                      <KCircle x={left} y={top} radius={r} fill={'#FF5F57'} listening={false} />
+                      <KCircle x={left + (r*2) + gap} y={top} radius={r} fill={'#FEBC2E'} listening={false} />
+                      <KCircle x={left + (r*2)*2 + gap*2} y={top} radius={r} fill={'#28C840'} listening={false} />
+                    </>
+                  )
+                })()}
+                {/* Address bar */}
+                {(() => {
+                  const topBarH = layout.topBarH
+                  const r = 6
+                  const gap = 10
+                  const lightsWidth = (r*2)*3 + gap*2
+                  const navW = 60
+                  const leftX = layout.winX + 16 + lightsWidth + 16 + navW + 16
+                  const rightMargin = 16 + (12*2 + 0) // plus button radius*2 + spacing already accounted below
+                  const w = Math.max(220, layout.winW - leftX - rightMargin)
+                  const h = 22
+                  const x = leftX
+                  const y = layout.winY + (topBarH - h) / 2
+                  return (
+                    <KRect x={x} y={y} width={w} height={h} cornerRadius={11} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
+                  )
+                })()}
+                {/* New tab (+) button */}
+                {(() => {
+                  const r = 12
+                  const cx = layout.winX + layout.winW - 16 - r
+                  const cy = layout.winY + layout.topBarH / 2
+                  const plus = 8
+                  return (
+                    <>
+                      <KCircle x={cx} y={cy} radius={r} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
+                      <KLine points={[cx - plus/2, cy, cx + plus/2, cy]} stroke={'rgba(0,0,0,0.6)'} strokeWidth={2} listening={false} />
+                      <KLine points={[cx, cy - plus/2, cx, cy + plus/2]} stroke={'rgba(0,0,0,0.6)'} strokeWidth={2} listening={false} />
+                    </>
+                  )
+                })()}
+              </>
+            )}
             {img && layout && (
-              <KonvaImage image={img} x={layout.offsetX} y={layout.offsetY} width={img.naturalWidth * layout.scale} height={img.naturalHeight * layout.scale} />
+              // Image clipped with rounded bottom corners (top corners covered by toolbar)
+              <>
+                <KonvaImage
+                  image={img}
+                  x={layout.offsetX}
+                  y={layout.offsetY}
+                  width={img.naturalWidth * layout.scale}
+                  height={img.naturalHeight * layout.scale}
+                  cornerRadius={safarize ? [0,0,12,12] as any : 0}
+                />
+              </>
             )}
             {img && layout && objects.map((obj) => {
               if (obj.type === 'arrow') return (

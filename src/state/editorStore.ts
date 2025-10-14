@@ -68,6 +68,7 @@ export interface SceneSnapshot {
 	historyIndex: number
 	objectHistories?: Record<string, ObjectChangeEntry[]>
 	objectHistoryIndex?: Record<string, number>
+  safarize?: boolean
 }
 
 export interface SceneMeta {
@@ -107,6 +108,10 @@ export interface EditorState {
 	switchScene: (id: string) => void
 	getActiveScene: () => SceneMeta | null
 	deleteScene: (id: string) => void
+	deleteAllScenes: () => Promise<void>
+	// safari-style frame
+	safarize: boolean
+	setSafarize: (v: boolean) => void
 	// editing session for arrows
 	editingArrowOriginal: ArrowObject | null
 	editingArrowId: string | null
@@ -172,6 +177,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 	objectHistoryIndex: {},
 	scenes: [],
 	activeSceneId: null,
+  safarize: false,
 	hydrate: async () => {
 		const index = await loadIndex()
 		const activeId = await loadActiveSceneId()
@@ -185,14 +191,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		}
 		set({ scenes, activeSceneId: scenes.find(s => s.id === activeId)?.id ?? (scenes[0]?.id ?? null) })
 		const scene = get().getActiveScene()
-		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {} })
+		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {}, safarize: !!scene.snapshot.safarize })
 	},
 	addScene: ({ imageUrl, imageNatural, title }) => {
 		const state = get()
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex }
+				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -202,7 +208,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			title: title ?? `Изображение ${get().scenes.length + 1}`,
 			imageUrl,
 			imageNatural,
-			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {} }
+			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, safarize: false }
 		}
 		set({
 			scenes: [...get().scenes, newScene],
@@ -210,7 +216,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			objects: [], history: [], historyIndex: -1,
 			objectHistories: {}, objectHistoryIndex: {},
 			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
-			tool: 'select'
+			tool: 'select', safarize: false
 		})
 		fetch(imageUrl).then(r => r.blob()).then(async blob => {
 			await saveBlob(id, blob)
@@ -224,7 +230,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex }
+				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -240,7 +246,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			selectedId: null,
 			editingArrowId: null,
 			editingArrowOriginal: null,
-			tool: 'select'
+			tool: 'select',
+			safarize: !!target.snapshot.safarize
 		})
 		saveActiveSceneId(id)
 	},
@@ -293,6 +300,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			set({ scenes: newScenes })
 		}
 	},
+	deleteAllScenes: async () => {
+		const state = get()
+		for (const s of state.scenes) {
+			try { URL.revokeObjectURL(s.imageUrl) } catch {}
+			await deleteBlob(s.id)
+			await deleteSnapshot(s.id)
+		}
+		await saveIndex([])
+		await saveActiveSceneId(null)
+		set({
+			scenes: [],
+			activeSceneId: null,
+			objects: [], history: [], historyIndex: -1,
+			objectHistories: {}, objectHistoryIndex: {},
+			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
+			tool: 'select'
+		})
+	},
 	applyChange: (entry) => {
 		const state = get()
 		const trimmed = state.history.slice(0, state.historyIndex + 1)
@@ -302,9 +327,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		set({ history, historyIndex, objects })
 		const scene = get().getActiveScene()
 		if (scene) {
-			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex } }) : s)
+			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize } }) : s)
 			set({ scenes })
-			saveSnapshot(scene.id, { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex })
+			saveSnapshot(scene.id, { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize })
 		}
 	},
 	undo: () => {
@@ -401,6 +426,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			saveSnapshot(scene.id, { ...scene.snapshot, objects })
 		}
 	},
+	setSafarize: (v) => {
+		set({ safarize: v })
+		const scene = get().getActiveScene()
+		if (scene) {
+			const snap = { ...scene.snapshot, safarize: v }
+			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: snap }) : s)
+			set({ scenes })
+			saveSnapshot(scene.id, snap)
+		}
+	},
 	enterArrowEdit: (id) => set({ selectedId: id, editingArrowId: id }),
 	exitArrowEdit: () => set({ editingArrowId: null }),
 	setTool: (tool) => set({ tool, selectedId: null, drawingDraft: null }),
@@ -426,21 +461,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			const obj: ArrowObject = { id: uid(), type: 'arrow', start, control: mid, end: current, color: get().strokeColor, strokeWidth: get().strokeWidth }
 			get().applyChange({ id: uid(), label: 'Стрелка', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id, editingArrowId: obj.id, tool: 'select' })
+			set({ drawingDraft: null, selectedId: obj.id, editingArrowId: obj.id })
 			return
 		}
 		if (type === 'rect') {
 			const obj: RectObject = { id: uid(), type: 'rect', x: minX, y: minY, width, height, color: get().strokeColor, strokeWidth: get().strokeWidth }
 			get().applyChange({ id: uid(), label: 'Рамка', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id, tool: 'select' })
+			set({ drawingDraft: null, selectedId: obj.id })
 			return
 		}
 		if (type === 'mosaic') {
 			const obj: MosaicObject = { id: uid(), type: 'mosaic', x: minX, y: minY, width, height, blockSize: get().mosaicBlockSize }
 			get().applyChange({ id: uid(), label: 'Мозаика', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id, tool: 'select' })
+			set({ drawingDraft: null, selectedId: obj.id })
 			return
 		}
 	},

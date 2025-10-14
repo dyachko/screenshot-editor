@@ -60,8 +60,10 @@ function App() {
   }, [])
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) onSelectFile(file)
+    const files = Array.from(e.target.files ?? [])
+    for (const file of files) {
+      onSelectFile(file)
+    }
     e.currentTarget.value = ''
   }, [onSelectFile])
 
@@ -72,13 +74,15 @@ function App() {
       // export at original image resolution by cropping to image area and scaling up
       const scale = useEditorStore.getState().viewScale || 1
       const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
+      const safarize = useEditorStore.getState().safarize
       const iw = activeScene.imageNatural.width
       const ih = activeScene.imageNatural.height
+      const topBar = safarize ? 40 : 0 // must match CanvasStage topBarH
+      const crop = safarize
+        ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
+        : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
       const dataUrl = stage.toDataURL({
-        x: viewOffsetX,
-        y: viewOffsetY,
-        width: iw * scale,
-        height: ih * scale,
+        ...crop,
         pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
       })
       const blob = await (await fetch(dataUrl)).blob()
@@ -110,18 +114,20 @@ function App() {
     try {
       const stage = useEditorStore.getState().stageRef
       if (stage) {
-        // copy at original image resolution by cropping to image area and scaling up
+        // copy at original image resolution; include Safari frame if enabled
         const scale = useEditorStore.getState().viewScale || 1
         const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
         const scene = activeScene
         if (!scene) return false
+        const safarize = useEditorStore.getState().safarize
         const iw = scene.imageNatural.width
         const ih = scene.imageNatural.height
+        const topBar = safarize ? 40 : 0
+        const crop = safarize
+          ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
+          : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
         const dataUrl = stage.toDataURL({
-          x: viewOffsetX,
-          y: viewOffsetY,
-          width: iw * scale,
-          height: ih * scale,
+          ...crop,
           pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)),
         })
         const blob = await (await fetch(dataUrl)).blob()
@@ -187,12 +193,19 @@ function App() {
     } catch (e) { console.error(e); return false }
   }, [activeScene])
 
+  const deleteAllScenes = useCallback(async () => {
+    const ok = confirm('Удалить все изображения? Действие необратимо.')
+    if (!ok) return
+    await useEditorStore.getState().deleteAllScenes()
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Toolbar onUpload={handleUploadClick} />
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         accept="image/*"
         style={{ display: 'none' }}
         onChange={handleFileChange}
@@ -201,9 +214,9 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.7</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v0.0.8</div>
       </div>
-      <BottomActions onExport={handleExport} onCopy={handleCopy} />
+      <BottomActions onExport={handleExport} onCopy={handleCopy} onDeleteAll={scenesCount > 0 ? deleteAllScenes : undefined} />
       </div>
   )
 }

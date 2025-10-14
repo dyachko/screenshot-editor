@@ -19,6 +19,8 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
   const setStrokeWidth = useEditorStore(s => s.setStrokeWidth)
   const mosaicBlockSize = useEditorStore(s => s.mosaicBlockSize)
   const setMosaicBlockSize = useEditorStore(s => s.setMosaicBlockSize)
+  const safarize = useEditorStore(s => s.safarize)
+  const setSafarize = useEditorStore(s => s.setSafarize)
 
   const [showTips, setShowTips] = useState(false)
   useEffect(() => {
@@ -93,6 +95,13 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
       <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Размер мозаики">
         <span style={{ fontSize: 12, opacity: 0.8 }}>Мозаика</span>
         <input type="range" min={4} max={48} value={mosaicBlockSize} onChange={e => setMosaicBlockSize(Number(e.target.value))} />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Сафаризатор (рамка Safari)">
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.8 }}>
+          <span>Сафаризатор</span>
+          <span style={{ fontSize: 10, textTransform: 'uppercase', color: '#2563eb', border: '1px solid rgba(37,99,235,0.35)', padding: '1px 6px', borderRadius: 999, background: 'rgba(37,99,235,0.10)' }}>Beta</span>
+        </span>
+        <input type="checkbox" checked={safarize} onChange={e => setSafarize(e.target.checked)} />
       </label>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
         <span style={{ opacity: 0.7, fontSize: 12 }}>Вставьте скриншот: ⌘/Ctrl+V</span>
