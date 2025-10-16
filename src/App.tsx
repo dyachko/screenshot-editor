@@ -299,7 +299,7 @@ function App() {
         {scenesCount > 1 && <ScenesSidebar />}
         <CanvasStage imageUrl={activeScene?.imageUrl ?? null} />
         <HistoryPanel />
-        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v1.0.2</div>
+        <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 12, opacity: 0.6, color: '#aaa', pointerEvents: 'none' }}>v1.0.3</div>
       </div>
       <BottomActions onExport={handleExport} onCopy={handleCopy} onExportAll={scenesCount > 0 ? handleExportAll : undefined} onDeleteAll={scenesCount > 0 ? deleteAllScenes : undefined} />
       </div>

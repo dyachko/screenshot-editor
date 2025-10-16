@@ -461,21 +461,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			const obj: ArrowObject = { id: uid(), type: 'arrow', start, control: mid, end: current, color: get().strokeColor, strokeWidth: get().strokeWidth }
 			get().applyChange({ id: uid(), label: 'Стрелка', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id, editingArrowId: obj.id })
+			set({ drawingDraft: null, selectedId: obj.id, editingArrowId: obj.id, tool: 'select' })
 			return
 		}
 		if (type === 'rect') {
 			const obj: RectObject = { id: uid(), type: 'rect', x: minX, y: minY, width, height, color: get().strokeColor, strokeWidth: get().strokeWidth }
 			get().applyChange({ id: uid(), label: 'Рамка', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id })
+			set({ drawingDraft: null, selectedId: obj.id, tool: 'select' })
 			return
 		}
 		if (type === 'mosaic') {
 			const obj: MosaicObject = { id: uid(), type: 'mosaic', x: minX, y: minY, width, height, blockSize: get().mosaicBlockSize }
 			get().applyChange({ id: uid(), label: 'Мозаика', op: { type: 'add', object: obj } })
 			get().logObjectChange(obj.id, 'Создано')
-			set({ drawingDraft: null, selectedId: obj.id })
+			set({ drawingDraft: null, selectedId: obj.id, tool: 'select' })
 			return
 		}
 	},
