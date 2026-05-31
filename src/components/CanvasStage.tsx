@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Image as KonvaImage, Circle as KCircle, Rect as KRect, Line as KLine } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Circle as KCircle, Rect as KRect, Line as KLine, Text as KText } from 'react-konva'
 import useImage from 'use-image'
 import { useEditorStore } from '../state/editorStore'
 import { ArrowShape } from './shapes/ArrowShape'
 import { RectOutlineShape } from './shapes/RectOutlineShape'
 import { MosaicShape } from './shapes/MosaicShape'
+import { SAFARI_FRAME } from '../constants/safariFrame'
 
 interface CanvasStageProps {
   imageUrl: string | null
@@ -38,6 +39,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const setViewOffset = useEditorStore(s => s.setViewOffset)
   const setStageRef = useEditorStore(s => s.setStageRef)
   const safarize = useEditorStore(s => s.safarize)
+  const safariShadow = useEditorStore(s => s.safariShadow)
 
   const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
 
@@ -117,8 +119,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     }
     const iw = img.naturalWidth
     const ih = img.naturalHeight
-    const topBarH = safarize ? 40 : 0
-    const outer = safarize ? 12 : 0 // margin outside the window
+    const topBarH = safarize ? SAFARI_FRAME.topBarHeight : 0
+    const outer = safarize ? (safariShadow ? SAFARI_FRAME.shadowPadding : SAFARI_FRAME.viewportPadding) : 0
     const scale = Math.min((size.width - outer * 2) / iw, (size.height - topBarH - outer * 2) / ih)
     const compW = iw * scale
     const compH = ih * scale + topBarH
@@ -131,7 +133,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     const stageFromImage = (p: { x: number; y: number }) => ({ x: offsetX + p.x * scale, y: offsetY + p.y * scale })
     const imageFromStage = (p: { x: number; y: number }) => ({ x: (p.x - offsetX) / scale, y: (p.y - offsetY) / scale })
     return { scale, offsetX, offsetY, topBarH, outer, winX, winY, winW, winH, stageFromImage, imageFromStage }
-  }, [img, size.width, size.height, safarize])
+  }, [img, size.width, size.height, safarize, safariShadow])
 
   useEffect(() => {
     if (layout) setViewScale(layout.scale)
@@ -283,6 +285,30 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     updateObjectLive(obj.id, { x, y, width, height })
   }
 
+  const getSafariChrome = (l: NonNullable<typeof layout>) => {
+    const topY = l.winY + 8
+    const centerY = l.winY + l.topBarH / 2
+    const showSidebar = l.winW >= 270
+    const showNav = l.winW >= 360
+    const showRightTools = l.winW >= 900
+    const leftEdge = l.winX + (showNav ? 264 : showSidebar ? 172 : 82)
+    const rightEdge = l.winX + l.winW - (showRightTools ? 146 : 18)
+    const desiredAddressW = Math.min(536, Math.max(120, rightEdge - leftEdge))
+    const centeredAddressX = l.winX + (l.winW - desiredAddressW) / 2
+    const addressX = Math.max(leftEdge, Math.min(centeredAddressX, rightEdge - 40))
+    const addressW = Math.max(40, Math.min(desiredAddressW, rightEdge - addressX))
+
+    return {
+      topY,
+      centerY,
+      showSidebar,
+      showNav,
+      showRightTools,
+      addressX,
+      addressW,
+    }
+  }
+
 
   return (
     <div ref={containerRef} id="canvas-root" style={{ width: '100%', height: '100%', background: '#111', color: '#999', position: 'relative' }}>
@@ -307,107 +333,120 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
         >
           <Layer>
             {img && layout && safarize && (
-              // Shadowed outer window
               <KRect
                 x={layout.winX}
                 y={layout.winY}
                 width={layout.winW}
                 height={layout.winH}
-                cornerRadius={12}
-                fill={'rgba(0,0,0,0.001)'}
-                shadowColor={'black'} shadowOpacity={0.25} shadowBlur={24} shadowOffset={{ x: 0, y: 8 }}
+                cornerRadius={SAFARI_FRAME.cornerRadius}
+                fill={'#ffffff'}
+                shadowEnabled={safariShadow}
+                shadowColor={'black'}
+                shadowOpacity={0.28}
+                shadowBlur={SAFARI_FRAME.shadowBlur}
+                shadowOffset={{ x: 0, y: SAFARI_FRAME.shadowOffsetY }}
                 listening={false}
               />
             )}
             {img && layout && safarize && (
-              // Safari-like frame overlay
               <>
-                {/* Outer rounded border */}
-                <KRect
-                  x={layout.winX}
-                  y={layout.winY}
-                  width={layout.winW}
-                  height={layout.winH}
-                  cornerRadius={12}
-                  stroke={'rgba(255,255,255,0.35)'}
-                  strokeWidth={1}
-                  listening={false}
-                />
-                {/* Top toolbar */}
                 <KRect
                   x={layout.winX}
                   y={layout.winY}
                   width={layout.winW}
                   height={layout.topBarH}
-                  cornerRadius={[12,12,0,0] as any}
-                  fill={'rgba(243,244,246,0.95)'}
+                  cornerRadius={[SAFARI_FRAME.cornerRadius, SAFARI_FRAME.cornerRadius, 0, 0] as any}
+                  fill={'#202127'}
                   listening={false}
                 />
-                {/* Nav segmented control (back/forward) */}
+                <KLine
+                  points={[layout.winX, layout.winY + layout.topBarH - 0.5, layout.winX + layout.winW, layout.winY + layout.topBarH - 0.5]}
+                  stroke={'rgba(255,255,255,0.08)'}
+                  strokeWidth={1}
+                  listening={false}
+                />
                 {(() => {
-                  const r = 6
-                  const gap = 10
-                  const lightsWidth = (r*2)*3 + gap*2
-                  const h = 24
-                  const w = 60
-                  const x = layout.winX + 16 + lightsWidth + 16 // ensure no overlap with traffic lights
-                  const y = layout.winY + (layout.topBarH - h) / 2
-                  const cy = layout.winY + layout.topBarH / 2
-                  const backCx = x + w * 0.25
-                  const fwdCx = x + w * 0.75
-                  const size = 7
+                  const chrome = getSafariChrome(layout)
+                  if (!chrome.showNav) return null
+                  const x = layout.winX + 172
+                  const cy = chrome.centerY
+                  const muted = 'rgba(235,238,245,0.64)'
+                  const dim = 'rgba(235,238,245,0.32)'
                   return (
                     <>
-                      <KRect x={x} y={y} width={w} height={h} cornerRadius={12} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
-                      {/* back chevron "<" */}
-                      <KLine points={[backCx + 3, cy - size * 0.6, backCx - 3, cy, backCx + 3, cy + size * 0.6]} stroke={'rgba(0,0,0,0.7)'} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
-                      {/* forward chevron ">" */}
-                      <KLine points={[fwdCx - 3, cy - size * 0.6, fwdCx + 3, cy, fwdCx - 3, cy + size * 0.6]} stroke={'rgba(0,0,0,0.7)'} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
+                      <KRect x={x} y={cy - 18} width={74} height={36} cornerRadius={18} fill={'#24262d'} stroke={'rgba(255,255,255,0.12)'} strokeWidth={1} listening={false} />
+                      <KLine points={[x + 26, cy - 7, x + 18, cy, x + 26, cy + 7]} stroke={muted} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
+                      <KLine points={[x + 49, cy - 7, x + 57, cy, x + 49, cy + 7]} stroke={dim} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
+                      <KLine points={[x + 37, cy - 12, x + 37, cy + 12]} stroke={'rgba(255,255,255,0.08)'} strokeWidth={1} listening={false} />
                     </>
                   )
                 })()}
-                {/* Traffic lights */}
                 {(() => {
-                  const top = layout.winY + 14
-                  const left = layout.winX + 16
+                  const chrome = getSafariChrome(layout)
+                  const top = chrome.centerY
+                  const left = layout.winX + 18
                   const r = 6
-                  const gap = 10
+                  const gap = 8
                   return (
                     <>
-                      <KCircle x={left} y={top} radius={r} fill={'#FF5F57'} listening={false} />
-                      <KCircle x={left + (r*2) + gap} y={top} radius={r} fill={'#FEBC2E'} listening={false} />
-                      <KCircle x={left + (r*2)*2 + gap*2} y={top} radius={r} fill={'#28C840'} listening={false} />
+                      <KCircle x={left} y={top} radius={r} fill={'#ff5f57'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
+                      <KCircle x={left + (r*2) + gap} y={top} radius={r} fill={'#febc2e'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
+                      <KCircle x={left + (r*2)*2 + gap*2} y={top} radius={r} fill={'#28c840'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
+                      {chrome.showSidebar && (
+                        <>
+                          <KRect x={layout.winX + 96} y={top - 18} width={68} height={36} cornerRadius={18} fill={'#24262d'} stroke={'rgba(255,255,255,0.14)'} strokeWidth={1} listening={false} />
+                          <KRect x={layout.winX + 111} y={top - 9} width={17} height={18} cornerRadius={3} stroke={'rgba(235,238,245,0.72)'} strokeWidth={1.3} listening={false} />
+                          <KLine points={[layout.winX + 117, top - 7, layout.winX + 117, top + 7]} stroke={'rgba(235,238,245,0.46)'} strokeWidth={1} listening={false} />
+                          <KLine points={[layout.winX + 134, top - 2, layout.winX + 139, top + 3, layout.winX + 144, top - 2]} stroke={'rgba(235,238,245,0.72)'} strokeWidth={1.5} lineCap={'round'} lineJoin={'round'} listening={false} />
+                        </>
+                      )}
                     </>
                   )
                 })()}
-                {/* Address bar */}
                 {(() => {
-                  const topBarH = layout.topBarH
-                  const r = 6
-                  const gap = 10
-                  const lightsWidth = (r*2)*3 + gap*2
-                  const navW = 60
-                  const leftX = layout.winX + 16 + lightsWidth + 16 + navW + 16
-                  const rightMargin = 16 + (12*2 + 0) // plus button radius*2 + spacing already accounted below
-                  const w = Math.max(220, layout.winW - leftX - rightMargin)
-                  const h = 22
-                  const x = leftX
-                  const y = layout.winY + (topBarH - h) / 2
-                  return (
-                    <KRect x={x} y={y} width={w} height={h} cornerRadius={11} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
-                  )
-                })()}
-                {/* New tab (+) button */}
-                {(() => {
-                  const r = 12
-                  const cx = layout.winX + layout.winW - 16 - r
-                  const cy = layout.winY + layout.topBarH / 2
-                  const plus = 8
+                  const chrome = getSafariChrome(layout)
+                  const h = 30
+                  const w = chrome.addressW
+                  const x = chrome.addressX
+                  const y = chrome.topY
                   return (
                     <>
-                      <KCircle x={cx} y={cy} radius={r} fill={'rgba(229,231,235,0.9)'} stroke={'rgba(0,0,0,0.06)'} strokeWidth={1} listening={false} />
-                      <KLine points={[cx - plus/2, cy, cx + plus/2, cy]} stroke={'rgba(0,0,0,0.6)'} strokeWidth={2} listening={false} />
-                      <KLine points={[cx, cy - plus/2, cx, cy + plus/2]} stroke={'rgba(0,0,0,0.6)'} strokeWidth={2} listening={false} />
+                      <KRect x={x} y={y} width={w} height={h} cornerRadius={15} fill={'#24272f'} stroke={'rgba(255,255,255,0.16)'} strokeWidth={1} listening={false} />
+                      <KText x={x} y={y + 7} width={w} text={'screenshot.tilda'} fontFamily={'Inter, -apple-system, BlinkMacSystemFont, sans-serif'} fontStyle={'bold'} fontSize={12} fill={'rgba(255,255,255,0.88)'} align={'center'} listening={false} />
+                      {w > 132 && (
+                        <>
+                          <KRect x={x + 13} y={y + 9} width={11} height={12} cornerRadius={2} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.2} listening={false} />
+                          <KLine points={[x + 16, y + 14, x + 22, y + 14]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.2} lineCap={'round'} listening={false} />
+                        </>
+                      )}
+                      {w > 168 && (
+                        <>
+                          <KLine points={[x + w - 17, y + 9, x + w - 17, y + 21]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.4} lineCap={'round'} listening={false} />
+                          <KLine points={[x + w - 23, y + 15, x + w - 17, y + 21, x + w - 11, y + 15]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
+                        </>
+                      )}
+                    </>
+                  )
+                })()}
+                {(() => {
+                  const chrome = getSafariChrome(layout)
+                  if (!chrome.showRightTools) return null
+                  const cx = layout.winX + layout.winW - 28
+                  const cy = chrome.centerY
+                  const plus = 11
+                  const icon = 'rgba(235,238,245,0.76)'
+                  return (
+                    <>
+                      <KCircle x={cx - 110} y={cy} radius={8} stroke={icon} strokeWidth={1.4} listening={false} />
+                      <KLine points={[cx - 110, cy - 4, cx - 110, cy + 4]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
+                      <KLine points={[cx - 114, cy, cx - 106, cy]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
+                      <KRect x={cx - 80} y={cy - 5} width={12} height={13} cornerRadius={2} stroke={icon} strokeWidth={1.4} listening={false} />
+                      <KLine points={[cx - 74, cy - 10, cx - 74, cy + 1]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
+                      <KLine points={[cx - 80, cy - 4, cx - 74, cy - 10, cx - 68, cy - 4]} stroke={icon} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
+                      <KLine points={[cx - 41, cy - plus/2, cx - 41, cy + plus/2]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
+                      <KLine points={[cx - 41 - plus/2, cy, cx - 41 + plus/2, cy]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
+                      <KLine points={[cx - plus/2, cy, cx + plus/2, cy]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
+                      <KLine points={[cx - plus/2, cy - plus/2, cx + plus/2, cy - plus/2, cx + plus/2, cy + plus/2, cx - plus/2, cy + plus/2, cx - plus/2, cy - plus/2]} stroke={icon} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
                     </>
                   )
                 })()}
@@ -422,8 +461,20 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                   y={layout.offsetY}
                   width={img.naturalWidth * layout.scale}
                   height={img.naturalHeight * layout.scale}
-                  cornerRadius={safarize ? [0,0,12,12] as any : 0}
+                  cornerRadius={safarize ? [0,0,SAFARI_FRAME.cornerRadius,SAFARI_FRAME.cornerRadius] as any : 0}
                 />
+                {safarize && (
+                  <KRect
+                    x={layout.winX}
+                    y={layout.winY}
+                    width={layout.winW}
+                    height={layout.winH}
+                    cornerRadius={SAFARI_FRAME.cornerRadius}
+                    stroke={'rgba(0,0,0,0.18)'}
+                    strokeWidth={1}
+                    listening={false}
+                  />
+                )}
               </>
             )}
             {img && layout && objects.map((obj) => {

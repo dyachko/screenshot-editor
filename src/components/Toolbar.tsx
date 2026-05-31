@@ -21,6 +21,8 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
   const setMosaicBlockSize = useEditorStore(s => s.setMosaicBlockSize)
   const safarize = useEditorStore(s => s.safarize)
   const setSafarize = useEditorStore(s => s.setSafarize)
+  const safariShadow = useEditorStore(s => s.safariShadow)
+  const setSafariShadow = useEditorStore(s => s.setSafariShadow)
 
   const [showTips, setShowTips] = useState(false)
   useEffect(() => {
@@ -99,9 +101,12 @@ export const Toolbar = memo(({ onUpload }: ToolbarProps) => {
       <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Сафаризатор (рамка Safari)">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.8 }}>
           <span>Сафаризатор</span>
-          <span style={{ fontSize: 10, textTransform: 'uppercase', color: '#2563eb', border: '1px solid rgba(37,99,235,0.35)', padding: '1px 6px', borderRadius: 999, background: 'rgba(37,99,235,0.10)' }}>Beta</span>
         </span>
         <input type="checkbox" checked={safarize} onChange={e => setSafarize(e.target.checked)} />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: safarize ? 1 : 0.45 }} title="Добавить тень к Safari-окну">
+        <span style={{ fontSize: 12, opacity: 0.8 }}>Тень</span>
+        <input type="checkbox" checked={safariShadow} disabled={!safarize} onChange={e => setSafariShadow(e.target.checked)} />
       </label>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
         <span style={{ opacity: 0.7, fontSize: 12 }}>Вставьте скриншот: ⌘/Ctrl+V</span>

@@ -8,6 +8,27 @@ import { useEditorStore } from './state/editorStore'
 import { BottomActions } from './components/BottomActions'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ScenesSidebar } from './components/ScenesSidebar'
+import { SAFARI_FRAME } from './constants/safariFrame'
+
+function getExportCrop(params: {
+  safarize: boolean
+  safariShadow: boolean
+  viewOffsetX: number
+  viewOffsetY: number
+  imageWidth: number
+  imageHeight: number
+  scale: number
+}) {
+  const { safarize, safariShadow, viewOffsetX, viewOffsetY, imageWidth, imageHeight, scale } = params
+  if (!safarize) return { x: viewOffsetX, y: viewOffsetY, width: imageWidth * scale, height: imageHeight * scale }
+  const shadowPad = safariShadow ? SAFARI_FRAME.shadowPadding : 0
+  return {
+    x: viewOffsetX - shadowPad,
+    y: viewOffsetY - SAFARI_FRAME.topBarHeight - shadowPad,
+    width: imageWidth * scale + shadowPad * 2,
+    height: imageHeight * scale + SAFARI_FRAME.topBarHeight + shadowPad * 2,
+  }
+}
 
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -76,12 +97,10 @@ function App() {
       const scale = useEditorStore.getState().viewScale || 1
       const { viewOffsetX, viewOffsetY } = useEditorStore.getState()
       const safarize = useEditorStore.getState().safarize
+      const safariShadow = useEditorStore.getState().safariShadow
       const iw = activeScene.imageNatural.width
       const ih = activeScene.imageNatural.height
-      const topBar = safarize ? 40 : 0 // must match CanvasStage topBarH
-      const crop = safarize
-        ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
-        : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
+      const crop = getExportCrop({ safarize, safariShadow, viewOffsetX, viewOffsetY, imageWidth: iw, imageHeight: ih, scale })
       // retry a few times to avoid rare empty frames
       const toDataUrlReliable = async () => {
         for (let i = 0; i < 3; i++) {
@@ -127,12 +146,10 @@ function App() {
         const scene = activeScene
         if (!scene) return false
         const safarize = useEditorStore.getState().safarize
+        const safariShadow = useEditorStore.getState().safariShadow
         const iw = scene.imageNatural.width
         const ih = scene.imageNatural.height
-        const topBar = safarize ? 40 : 0
-        const crop = safarize
-          ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
-          : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
+        const crop = getExportCrop({ safarize, safariShadow, viewOffsetX, viewOffsetY, imageWidth: iw, imageHeight: ih, scale })
         const toDataUrlReliable = async () => {
           for (let i = 0; i < 3; i++) {
             const url = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })
@@ -251,12 +268,10 @@ function App() {
         const scale = st.viewScale || 1
         const { viewOffsetX, viewOffsetY } = st
         const safarize = st.safarize
+        const safariShadow = st.safariShadow
         const iw = sc.imageNatural.width
         const ih = sc.imageNatural.height
-        const topBar = safarize ? 40 : 0
-        const crop = safarize
-          ? { x: viewOffsetX, y: viewOffsetY - topBar, width: iw * scale, height: ih * scale + topBar }
-          : { x: viewOffsetX, y: viewOffsetY, width: iw * scale, height: ih * scale }
+        const crop = getExportCrop({ safarize, safariShadow, viewOffsetX, viewOffsetY, imageWidth: iw, imageHeight: ih, scale })
         const toDataUrlReliable = async () => {
           for (let i = 0; i < 3; i++) {
             const url = stage.toDataURL({ ...crop, pixelRatio: Math.max(1, 1 / Math.max(scale, 1e-6)) })

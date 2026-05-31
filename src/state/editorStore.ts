@@ -68,7 +68,8 @@ export interface SceneSnapshot {
 	historyIndex: number
 	objectHistories?: Record<string, ObjectChangeEntry[]>
 	objectHistoryIndex?: Record<string, number>
-  safarize?: boolean
+	safarize?: boolean
+	safariShadow?: boolean
 }
 
 export interface SceneMeta {
@@ -112,6 +113,8 @@ export interface EditorState {
 	// safari-style frame
 	safarize: boolean
 	setSafarize: (v: boolean) => void
+	safariShadow: boolean
+	setSafariShadow: (v: boolean) => void
 	// editing session for arrows
 	editingArrowOriginal: ArrowObject | null
 	editingArrowId: string | null
@@ -177,7 +180,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 	objectHistoryIndex: {},
 	scenes: [],
 	activeSceneId: null,
-  safarize: false,
+	safarize: false,
+	safariShadow: false,
 	hydrate: async () => {
 		const index = await loadIndex()
 		const activeId = await loadActiveSceneId()
@@ -191,14 +195,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		}
 		set({ scenes, activeSceneId: scenes.find(s => s.id === activeId)?.id ?? (scenes[0]?.id ?? null) })
 		const scene = get().getActiveScene()
-		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {}, safarize: !!scene.snapshot.safarize })
+		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {}, safarize: !!scene.snapshot.safarize, safariShadow: !!scene.snapshot.safariShadow })
 	},
 	addScene: ({ imageUrl, imageNatural, title }) => {
 		const state = get()
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize }
+				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -208,7 +212,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			title: title ?? `Изображение ${get().scenes.length + 1}`,
 			imageUrl,
 			imageNatural,
-			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, safarize: false }
+			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, safarize: false, safariShadow: false }
 		}
 		set({
 			scenes: [...get().scenes, newScene],
@@ -216,7 +220,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			objects: [], history: [], historyIndex: -1,
 			objectHistories: {}, objectHistoryIndex: {},
 			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
-			tool: 'select', safarize: false
+			tool: 'select', safarize: false, safariShadow: false
 		})
 		fetch(imageUrl).then(r => r.blob()).then(async blob => {
 			await saveBlob(id, blob)
@@ -230,7 +234,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize }
+				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -247,7 +251,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			editingArrowId: null,
 			editingArrowOriginal: null,
 			tool: 'select',
-			safarize: !!target.snapshot.safarize
+			safarize: !!target.snapshot.safarize,
+			safariShadow: !!target.snapshot.safariShadow
 		})
 		saveActiveSceneId(id)
 	},
@@ -281,7 +286,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 					selectedId: null,
 					editingArrowId: null,
 					editingArrowOriginal: null,
-					tool: 'select'
+					tool: 'select',
+					safarize: false,
+					safariShadow: false
 				})
 				await saveActiveSceneId(target.id)
 			} else {
@@ -315,7 +322,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			objects: [], history: [], historyIndex: -1,
 			objectHistories: {}, objectHistoryIndex: {},
 			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
-			tool: 'select'
+			tool: 'select',
+			safarize: false,
+			safariShadow: false
 		})
 	},
 	applyChange: (entry) => {
@@ -327,9 +336,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		set({ history, historyIndex, objects })
 		const scene = get().getActiveScene()
 		if (scene) {
-			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize } }) : s)
+			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow } }) : s)
 			set({ scenes })
-			saveSnapshot(scene.id, { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize })
+			saveSnapshot(scene.id, { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow })
 		}
 	},
 	undo: () => {
@@ -431,6 +440,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		const scene = get().getActiveScene()
 		if (scene) {
 			const snap = { ...scene.snapshot, safarize: v }
+			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: snap }) : s)
+			set({ scenes })
+			saveSnapshot(scene.id, snap)
+		}
+	},
+	setSafariShadow: (v) => {
+		set({ safariShadow: v })
+		const scene = get().getActiveScene()
+		if (scene) {
+			const snap = { ...scene.snapshot, safariShadow: v }
 			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: snap }) : s)
 			set({ scenes })
 			saveSnapshot(scene.id, snap)
