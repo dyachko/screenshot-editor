@@ -29,6 +29,9 @@ function arrowHead(base: Point, tip: Point, size: number) {
 }
 
 export function ArrowShape({ start, control, end, color, strokeWidth, stageFromImage }: ArrowShapeProps) {
+	const origin = stageFromImage({ x: 0, y: 0 })
+	const unit = stageFromImage({ x: 1, y: 0 })
+	const scaledStroke = strokeWidth * Math.hypot(unit.x - origin.x, unit.y - origin.y)
 	const curveImg = quadPoints(start, control, end)
 	const curveStage = [] as number[]
 	for (let i = 0; i < curveImg.length; i += 2) {
@@ -44,8 +47,8 @@ export function ArrowShape({ start, control, end, color, strokeWidth, stageFromI
 	const r = stageFromImage(rImg)
 	return (
 		<Group>
-			<Line points={curveStage} stroke={color} strokeWidth={strokeWidth} lineCap="round" lineJoin="round"/>
-			<Line points={[l.x, l.y, tip.x, tip.y, r.x, r.y]} closed fill={color} stroke={color} strokeWidth={strokeWidth} />
+			<Line points={curveStage} stroke={color} strokeWidth={scaledStroke} lineCap="round" lineJoin="round"/>
+			<Line points={[l.x, l.y, tip.x, tip.y, r.x, r.y]} closed fill={color} stroke={color} strokeWidth={scaledStroke} />
 		</Group>
 	)
-} 
+}

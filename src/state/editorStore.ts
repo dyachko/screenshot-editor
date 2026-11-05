@@ -1,9 +1,13 @@
 import { create } from 'zustand'
-import { deleteBlob, deleteSnapshot, loadActiveSceneId, loadBlob, loadIndex, loadSnapshot, saveActiveSceneId, saveBlob, saveIndex, saveSnapshot } from '../services/persistence'
+import { loadActiveSceneId, loadBlob, loadIndex, loadSnapshot, loadStrokeColor, removeStoredScenes, saveActiveSceneId, saveBlob, saveIndex, saveSnapshot, saveStrokeColor } from '../services/persistence'
 
-export type Tool = 'select' | 'arrow' | 'rect' | 'mosaic'
+export type Tool = 'select' | 'arrow' | 'rect' | 'mosaic' | 'crop' | 'marker' | 'text' | 'spotlight'
 
 export interface Point { x: number; y: number }
+export interface ImageBounds extends Point { width: number; height: number }
+export const MARKER_RADIUS = 14
+export const DEFAULT_ANNOTATION_COLOR = '#f99761'
+export const LEGACY_MARKER_COLOR = '#2358bf'
 
 export interface ArrowObject {
 	id: string
@@ -36,10 +40,16 @@ export interface MosaicObject {
 	blockSize: number
 }
 
-export type SceneObject = ArrowObject | RectObject | MosaicObject
+export interface MarkerObject extends Point { id: string; type: 'marker'; number: number; color?: string; numberColor?: string }
+// Keep existing masks in saved scenes even though the creation tool is gone.
+export interface RedactObject extends ImageBounds { id: string; type: 'redact' }
+export interface TextStyle { text: string; fontSize: number; background: boolean; color?: string }
+export interface TextObject extends Point, TextStyle { id: string; type: 'text' }
+export interface SpotlightObject extends ImageBounds { id: string; type: 'spotlight' }
+export type SceneObject = ArrowObject | RectObject | MosaicObject | MarkerObject | RedactObject | TextObject | SpotlightObject
 
 interface DrawingDraft {
-	type: 'arrow' | 'rect' | 'mosaic'
+	type: Exclude<Tool, 'select' | 'marker' | 'text' | 'crop'>
 	start: Point
 	current: Point
 }
@@ -47,12 +57,22 @@ interface DrawingDraft {
 export type ChangeOp =
 	| { type: 'add'; object: SceneObject }
 	| { type: 'updateArrow'; id: string; changes: Partial<Pick<ArrowObject, 'start' | 'control' | 'end' | 'color' | 'strokeWidth'>> }
+	| { type: 'update'; object: SceneObject }
 	| { type: 'remove'; id: string }
+	| { type: 'crop'; bounds: ImageBounds | null }
 
 export interface HistoryEntry {
 	id: string
 	label: string
 	op: ChangeOp
+}
+
+export function getSceneCrop(history: HistoryEntry[], index: number) {
+	for (let i = index; i >= 0; i--) {
+		const op = history[i].op
+		if (op.type === 'crop') return op.bounds
+	}
+	return null
 }
 
 export interface ObjectChangeEntry {
@@ -68,8 +88,9 @@ export interface SceneSnapshot {
 	historyIndex: number
 	objectHistories?: Record<string, ObjectChangeEntry[]>
 	objectHistoryIndex?: Record<string, number>
-	safarize?: boolean
-	safariShadow?: boolean
+  safarize?: boolean
+  safariShadow?: boolean
+  safariAddress?: string
 }
 
 export interface SceneMeta {
@@ -86,9 +107,12 @@ export interface EditorState {
 	objects: SceneObject[]
 	selectedId: string | null
 	strokeColor: string
+	markerColor: string
+	markerNumberColor?: string
 	strokeWidth: number
 	mosaicBlockSize: number
 	drawingDraft: DrawingDraft | null
+	cropDraft: ImageBounds | null
 	// flat history (compat)
 	history: HistoryEntry[]
 	historyIndex: number
@@ -108,13 +132,16 @@ export interface EditorState {
 	addScene: (scene: { imageUrl: string; imageNatural: { width: number; height: number }; title?: string }) => void
 	switchScene: (id: string) => void
 	getActiveScene: () => SceneMeta | null
-	deleteScene: (id: string) => void
-	deleteAllScenes: () => Promise<void>
+	deleteScenes: (ids: string[]) => Promise<void>
 	// safari-style frame
 	safarize: boolean
 	setSafarize: (v: boolean) => void
 	safariShadow: boolean
 	setSafariShadow: (v: boolean) => void
+	setSafariAddress: (address: string) => void
+	setCrop: (bounds: ImageBounds | null) => void
+	setCropDraft: (bounds: ImageBounds) => void
+	applyCropDraft: () => void
 	// editing session for arrows
 	editingArrowOriginal: ArrowObject | null
 	editingArrowId: string | null
@@ -124,12 +151,16 @@ export interface EditorState {
 	exitArrowEdit: () => void
 	// tools
 	setTool: (tool: Tool) => void
+	saveText: (target: Point | string, style: TextStyle) => void
 	startDrawing: (p: Point) => void
 	updateDrawing: (p: Point) => void
 	commitDrawing: () => void
 	setStrokeColor: (c: string) => void
+	setMarkerColor: (color: string) => void
+	setMarkerNumberColor: (color?: string) => void
 	setStrokeWidth: (w: number) => void
 	setMosaicBlockSize: (b: number) => void
+	setObjectStyle: (id: string, style: { color?: string; strokeWidth?: number; blockSize?: number }) => void
 	reset: () => void
 	selectObject: (id: string | null) => void
 	updateArrowLive: (id: string, changes: Partial<Pick<ArrowObject, 'start' | 'control' | 'end'>>) => void
@@ -153,6 +184,7 @@ function uid() {
 
 function applyOp(objects: SceneObject[], op: ChangeOp): SceneObject[] {
 	if (op.type === 'add') return [...objects, op.object]
+	if (op.type === 'update') return objects.map(o => o.id === op.object.id ? op.object : o)
 	if (op.type === 'remove') return objects.filter(o => o.id !== op.id)
 	if (op.type === 'updateArrow') return objects.map(o => o.id === op.id && o.type === 'arrow' ? { ...o, ...op.changes } : o)
 	return objects
@@ -166,23 +198,41 @@ function recomputeObjectsFromHistory(entries: HistoryEntry[], index: number): Sc
 	return objs
 }
 
+function historyIndexesFor(objects: SceneObject[], histories: Record<string, ObjectChangeEntry[]>, previous: Record<string, number>) {
+	const indexes = { ...previous }
+	for (const obj of objects) {
+		const list = histories[obj.id] ?? []
+		for (let i = list.length - 1; i >= 0; i--) {
+			if (JSON.stringify(list[i].state) === JSON.stringify(obj)) {
+				indexes[obj.id] = i
+				break
+			}
+		}
+	}
+	return indexes
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
 	tool: 'select',
 	objects: [],
 	selectedId: null,
-	strokeColor: '#F99761',
+	strokeColor: DEFAULT_ANNOTATION_COLOR,
+	markerColor: DEFAULT_ANNOTATION_COLOR,
 	strokeWidth: 3,
 	mosaicBlockSize: 12,
 	drawingDraft: null,
+	cropDraft: null,
 	history: [],
 	historyIndex: -1,
 	objectHistories: {},
 	objectHistoryIndex: {},
 	scenes: [],
 	activeSceneId: null,
-	safarize: false,
-	safariShadow: false,
+  safarize: false,
+  safariShadow: true,
 	hydrate: async () => {
+		const strokeColor = await loadStrokeColor()
+		if (strokeColor && /^#[0-9a-f]{6}$/i.test(strokeColor)) set({ strokeColor })
 		const index = await loadIndex()
 		const activeId = await loadActiveSceneId()
 		const scenes: SceneMeta[] = []
@@ -195,14 +245,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		}
 		set({ scenes, activeSceneId: scenes.find(s => s.id === activeId)?.id ?? (scenes[0]?.id ?? null) })
 		const scene = get().getActiveScene()
-		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {}, safarize: !!scene.snapshot.safarize, safariShadow: !!scene.snapshot.safariShadow })
+		if (scene) set({ objects: scene.snapshot.objects, history: scene.snapshot.history, historyIndex: scene.snapshot.historyIndex, objectHistories: scene.snapshot.objectHistories ?? {}, objectHistoryIndex: scene.snapshot.objectHistoryIndex ?? {}, safarize: !!scene.snapshot.safarize, safariShadow: scene.snapshot.safariShadow ?? true })
 	},
 	addScene: ({ imageUrl, imageNatural, title }) => {
 		const state = get()
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow }
+				snapshot: { ...s.snapshot, objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: state.safarize, safariShadow: state.safariShadow }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -212,15 +262,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			title: title ?? `Изображение ${get().scenes.length + 1}`,
 			imageUrl,
 			imageNatural,
-			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, safarize: false, safariShadow: false }
+			snapshot: { objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, safarize: false, safariShadow: true }
 		}
 		set({
 			scenes: [...get().scenes, newScene],
 			activeSceneId: id,
 			objects: [], history: [], historyIndex: -1,
 			objectHistories: {}, objectHistoryIndex: {},
-			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
-			tool: 'select', safarize: false, safariShadow: false
+			selectedId: null, drawingDraft: null, cropDraft: null, editingArrowId: null, editingArrowOriginal: null,
+			tool: 'select', safarize: false, safariShadow: true
 		})
 		fetch(imageUrl).then(r => r.blob()).then(async blob => {
 			await saveBlob(id, blob)
@@ -234,7 +284,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		if (state.activeSceneId) {
 			const updatedScenes = state.scenes.map(s => s.id === state.activeSceneId ? ({
 				...s,
-				snapshot: { objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow }
+				snapshot: { ...s.snapshot, objects: state.objects, history: state.history, historyIndex: state.historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: state.safarize, safariShadow: state.safariShadow }
 			}) : s)
 			set({ scenes: updatedScenes })
 		}
@@ -248,11 +298,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			objectHistories: target.snapshot.objectHistories ?? {},
 			objectHistoryIndex: target.snapshot.objectHistoryIndex ?? {},
 			selectedId: null,
+			drawingDraft: null,
+			cropDraft: null,
 			editingArrowId: null,
 			editingArrowOriginal: null,
 			tool: 'select',
 			safarize: !!target.snapshot.safarize,
-			safariShadow: !!target.snapshot.safariShadow
+			safariShadow: target.snapshot.safariShadow ?? true
 		})
 		saveActiveSceneId(id)
 	},
@@ -260,72 +312,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		const { scenes, activeSceneId } = get()
 		return scenes.find(s => s.id === activeSceneId) ?? null
 	},
-	deleteScene: async (id: string) => {
+	deleteScenes: async (ids) => {
+		const selected = new Set(ids)
 		const state = get()
-		const idx = state.scenes.findIndex(s => s.id === id)
-		if (idx === -1) return
-		const removed = state.scenes[idx]
-		try { URL.revokeObjectURL(removed.imageUrl) } catch {}
-		const newScenes = state.scenes.filter(s => s.id !== id)
-		await deleteBlob(id)
-		await deleteSnapshot(id)
-		await saveIndex(newScenes.map(s => ({ id: s.id, title: s.title, imageNatural: s.imageNatural })))
-		if (state.activeSceneId === id) {
-			if (newScenes.length > 0) {
-				const newIdx = Math.min(idx, newScenes.length - 1)
-				const target = newScenes[newIdx]
-				const snap = target.snapshot
-				set({
-					scenes: newScenes,
-					activeSceneId: target.id,
-					objects: snap.objects,
-					history: snap.history,
-					historyIndex: snap.historyIndex,
-					objectHistories: snap.objectHistories ?? {},
-					objectHistoryIndex: snap.objectHistoryIndex ?? {},
-					selectedId: null,
-					editingArrowId: null,
-					editingArrowOriginal: null,
-					tool: 'select',
-					safarize: false,
-					safariShadow: false
-				})
-				await saveActiveSceneId(target.id)
-			} else {
-				set({
-					scenes: [],
-					activeSceneId: null,
-					objects: [], history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {},
-					selectedId: null,
-					editingArrowId: null,
-					editingArrowOriginal: null,
-					tool: 'select'
-				})
-				await saveActiveSceneId(null)
-			}
-		} else {
-			set({ scenes: newScenes })
+		const removed = state.scenes.filter(scene => selected.has(scene.id))
+		if (!removed.length) return
+		const remaining = state.scenes.filter(scene => !selected.has(scene.id))
+		const nextActive = (scenes: SceneMeta[], activeId: string | null) => {
+			if (activeId && !selected.has(activeId)) return activeId
+			const idx = Math.max(0, state.scenes.findIndex(scene => scene.id === activeId))
+			const earlier = state.scenes.slice(0, idx).filter(scene => !selected.has(scene.id)).length
+			return scenes[Math.min(earlier, scenes.length - 1)]?.id ?? null
 		}
-	},
-	deleteAllScenes: async () => {
-		const state = get()
-		for (const s of state.scenes) {
-			try { URL.revokeObjectURL(s.imageUrl) } catch {}
-			await deleteBlob(s.id)
-			await deleteSnapshot(s.id)
-		}
-		await saveIndex([])
-		await saveActiveSceneId(null)
-		set({
-			scenes: [],
-			activeSceneId: null,
-			objects: [], history: [], historyIndex: -1,
-			objectHistories: {}, objectHistoryIndex: {},
-			selectedId: null, editingArrowId: null, editingArrowOriginal: null,
-			tool: 'select',
-			safarize: false,
-			safariShadow: false
+		await removeStoredScenes(removed.map(scene => scene.id), remaining.map(({ id, title, imageNatural }) => ({ id, title, imageNatural })), nextActive(remaining, state.activeSceneId))
+		const current = get()
+		const scenes = current.scenes.filter(scene => !selected.has(scene.id))
+		const activeSceneId = nextActive(scenes, current.activeSceneId)
+		const snapshot = scenes.find(scene => scene.id === activeSceneId)?.snapshot
+		set(activeSceneId === current.activeSceneId ? { scenes } : {
+			scenes, activeSceneId,
+			objects: snapshot?.objects ?? [], history: snapshot?.history ?? [], historyIndex: snapshot?.historyIndex ?? -1,
+			objectHistories: snapshot?.objectHistories ?? {}, objectHistoryIndex: snapshot?.objectHistoryIndex ?? {},
+			selectedId: null, drawingDraft: null, cropDraft: null, editingArrowId: null, editingArrowOriginal: null,
+			tool: 'select', safarize: !!snapshot?.safarize, safariShadow: snapshot?.safariShadow ?? true,
 		})
+		for (const scene of removed) URL.revokeObjectURL(scene.imageUrl)
 	},
 	applyChange: (entry) => {
 		const state = get()
@@ -336,17 +347,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		set({ history, historyIndex, objects })
 		const scene = get().getActiveScene()
 		if (scene) {
-			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow } }) : s)
+			const snapshot = { ...scene.snapshot, objects, history, historyIndex, objectHistories: state.objectHistories, objectHistoryIndex: state.objectHistoryIndex, safarize: state.safarize, safariShadow: state.safariShadow }
+			const scenes = get().scenes.map(s => s.id === scene.id ? { ...s, snapshot } : s)
 			set({ scenes })
-			saveSnapshot(scene.id, { objects, history, historyIndex, objectHistories: get().objectHistories, objectHistoryIndex: get().objectHistoryIndex, safarize: get().safarize, safariShadow: get().safariShadow })
+			saveSnapshot(scene.id, snapshot)
 		}
 	},
 	undo: () => {
-		const { historyIndex, history, objectHistories, objectHistoryIndex } = get()
+		const { historyIndex, history, objectHistories } = get()
 		if (historyIndex < 0) return
 		const newIndex = historyIndex - 1
 		const objects = newIndex >= 0 ? recomputeObjectsFromHistory(history, newIndex) : []
-		set({ historyIndex: newIndex, objects, selectedId: null })
+		const objectHistoryIndex = historyIndexesFor(objects, objectHistories, get().objectHistoryIndex)
+		set({ historyIndex: newIndex, objects, objectHistoryIndex, selectedId: null })
 		const scene = get().getActiveScene()
 		if (scene) {
 			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { ...s.snapshot, historyIndex: newIndex, objects, objectHistories, objectHistoryIndex } }) : s)
@@ -355,11 +368,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		}
 	},
 	redo: () => {
-		const { historyIndex, history, objectHistories, objectHistoryIndex } = get()
+		const { historyIndex, history, objectHistories } = get()
 		if (historyIndex >= history.length - 1) return
 		const newIndex = historyIndex + 1
 		const objects = recomputeObjectsFromHistory(history, newIndex)
-		set({ historyIndex: newIndex, objects, selectedId: null })
+		const objectHistoryIndex = historyIndexesFor(objects, objectHistories, get().objectHistoryIndex)
+		set({ historyIndex: newIndex, objects, objectHistoryIndex, selectedId: null })
 		const scene = get().getActiveScene()
 		if (scene) {
 			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { ...s.snapshot, historyIndex: newIndex, objects, objectHistories, objectHistoryIndex } }) : s)
@@ -379,22 +393,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		set({ history: newHistory, historyIndex: newIndex, objects, selectedId: null })
 		const scene = get().getActiveScene()
 		if (scene) {
-			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { objects, history: newHistory, historyIndex: newIndex, objectHistories, objectHistoryIndex } }) : s)
+			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { ...s.snapshot, objects, history: newHistory, historyIndex: newIndex, objectHistories, objectHistoryIndex } }) : s)
 			set({ scenes })
-			saveSnapshot(scene.id, { objects, history: newHistory, historyIndex: newIndex, objectHistories, objectHistoryIndex })
+			saveSnapshot(scene.id, { ...scene.snapshot, objects, history: newHistory, historyIndex: newIndex, objectHistories, objectHistoryIndex })
 		}
 	},
 	logObjectChange: (id, label) => {
 		const obj = get().objects.find(o => o.id === id)
 		if (!obj) return
 		const list = get().objectHistories[id] ?? []
+		const previous = list[get().objectHistoryIndex[id] ?? list.length - 1]?.state
+		if (previous && JSON.stringify(previous) === JSON.stringify(obj)) return
 		const newList = [...list.slice(0, (get().objectHistoryIndex[id] ?? list.length - 1) + 1), { id: uid(), label, at: Date.now(), state: JSON.parse(JSON.stringify(obj)) }]
 		const objectHistories = { ...get().objectHistories, [id]: newList }
 		const objectHistoryIndex = { ...get().objectHistoryIndex, [id]: newList.length - 1 }
 		set({ objectHistories, objectHistoryIndex })
+		if (list.length > 0) get().applyChange({ id: uid(), label, op: { type: 'update', object: structuredClone(obj) } })
 		const scene = get().getActiveScene()
 		if (scene) {
-			const snap = { ...scene.snapshot, objectHistories, objectHistoryIndex }
+			const snap = { ...scene.snapshot, objects: get().objects, objectHistories, objectHistoryIndex }
 			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: snap }) : s)
 			set({ scenes })
 			saveSnapshot(scene.id, snap)
@@ -408,6 +425,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		const newIdx = idx - 1
 		const state = list[newIdx].state
 		set({ objects: get().objects.map(o => o.id === id ? (JSON.parse(JSON.stringify(state)) as any) : o), objectHistoryIndex: { ...get().objectHistoryIndex, [id]: newIdx } })
+		get().applyChange({ id: uid(), label: 'Изменено', op: { type: 'update', object: structuredClone(state) } })
 	},
 	redoObject: (id) => {
 		const list = get().objectHistories[id] ?? []
@@ -417,6 +435,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		const newIdx = idx + 1
 		const state = list[newIdx].state
 		set({ objects: get().objects.map(o => o.id === id ? (JSON.parse(JSON.stringify(state)) as any) : o), objectHistoryIndex: { ...get().objectHistoryIndex, [id]: newIdx } })
+		get().applyChange({ id: uid(), label: 'Изменено', op: { type: 'update', object: structuredClone(state) } })
 	},
 	editingArrowOriginal: null,
 	editingArrowId: null,
@@ -425,15 +444,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		if (arrow) set({ editingArrowOriginal: { ...arrow }, editingArrowId: id })
 	},
 	finishArrowEdit: (id) => {
-		const { objects } = get()
 		set({ editingArrowOriginal: null })
 		get().logObjectChange(id, 'Изменено')
-		const scene = get().getActiveScene()
-		if (scene) {
-			const scenes = get().scenes.map(s => s.id === scene.id ? ({ ...s, snapshot: { ...s.snapshot, objects } }) : s)
-			set({ scenes })
-			saveSnapshot(scene.id, { ...scene.snapshot, objects })
-		}
 	},
 	setSafarize: (v) => {
 		set({ safarize: v })
@@ -456,12 +468,78 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		}
 	},
 	enterArrowEdit: (id) => set({ selectedId: id, editingArrowId: id }),
+	setSafariAddress: (address) => {
+		const scene = get().getActiveScene()
+		if (!scene) return
+		const snapshot = { ...scene.snapshot, safariAddress: address.slice(0, 256) }
+		set({ scenes: get().scenes.map(s => s.id === scene.id ? { ...s, snapshot } : s) })
+		saveSnapshot(scene.id, snapshot)
+	},
+	setCrop: (bounds) => {
+		const { history, historyIndex, applyChange, getActiveScene } = get()
+		const scene = getActiveScene()
+		if (!scene) return
+		let next = null
+		if (bounds) {
+			const { width, height } = scene.imageNatural
+			const x = Math.max(0, Math.min(width - 1, Math.round(bounds.x)))
+			const y = Math.max(0, Math.min(height - 1, Math.round(bounds.y)))
+			const w = Math.max(1, Math.min(width, Math.round(bounds.x + bounds.width)) - x)
+			const h = Math.max(1, Math.min(height, Math.round(bounds.y + bounds.height)) - y)
+			if (w !== width || h !== height) next = { x, y, width: w, height: h }
+		}
+		const current = getSceneCrop(history, historyIndex)
+		if (JSON.stringify(current) !== JSON.stringify(next)) {
+			applyChange({ id: uid(), label: next ? 'Кадрирование' : 'Сброс кадрирования', op: { type: 'crop', bounds: next } })
+		}
+		set({ drawingDraft: null, cropDraft: null, tool: 'select', selectedId: null })
+	},
+	setCropDraft: (bounds) => { if (get().tool === 'crop') set({ cropDraft: bounds }) },
+	applyCropDraft: () => {
+		const { cropDraft, tool, setCrop } = get()
+		if (tool === 'crop' && cropDraft) setCrop(cropDraft)
+	},
 	exitArrowEdit: () => set({ editingArrowId: null }),
-	setTool: (tool) => set({ tool, selectedId: null, drawingDraft: null }),
+	setTool: (tool) => {
+		const state = get()
+		if (tool === 'crop' && state.tool === 'crop') return
+		const image = state.getActiveScene()?.imageNatural
+		const cropDraft = tool === 'crop' && image
+			? getSceneCrop(state.history, state.historyIndex) ?? { x: 0, y: 0, ...image }
+			: null
+		set({ tool, selectedId: null, drawingDraft: null, cropDraft })
+	},
+	saveText: (target, style) => {
+		const text = style.text.trim().slice(0, 500)
+		if (!text || !get().activeSceneId) return
+		const options = {
+			text, fontSize: Math.max(12, Math.min(96, Math.round(style.fontSize))), background: style.background,
+			...(style.color ? { color: style.color } : {}),
+		}
+		const { objects, applyChange, logObjectChange, updateObjectLive } = get()
+		if (typeof target === 'string') {
+			if (!objects.some(o => o.id === target && o.type === 'text')) return
+			updateObjectLive(target, options)
+			logObjectChange(target, 'Текст изменён')
+			return
+		}
+		const object: TextObject = { id: uid(), type: 'text', ...target, color: DEFAULT_ANNOTATION_COLOR, ...options }
+		applyChange({ id: uid(), label: 'Текст', op: { type: 'add', object } })
+		logObjectChange(object.id, 'Создано')
+		set({ selectedId: object.id, tool: 'select' })
+	},
 	startDrawing: (p) => {
 		const tool = get().tool
-		if (tool === 'select') return
-		set({ drawingDraft: { type: tool as 'arrow' | 'rect' | 'mosaic', start: p, current: p } })
+		if (tool === 'select' || tool === 'text' || tool === 'crop') return
+		if (tool === 'marker') {
+			const number = 1 + get().objects.reduce((max, obj) => obj.type === 'marker' ? Math.max(max, obj.number) : max, 0)
+			const { markerColor, markerNumberColor } = get()
+			const object: MarkerObject = { id: uid(), type: 'marker', ...p, number, color: markerColor, numberColor: markerNumberColor }
+			get().applyChange({ id: uid(), label: 'Метка', op: { type: 'add', object } })
+			get().logObjectChange(object.id, 'Создано')
+			return
+		}
+		set({ drawingDraft: { type: tool, start: p, current: p } })
 	},
 	updateDrawing: (p) => {
 		if (!get().drawingDraft) return
@@ -475,6 +553,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		const minY = Math.min(start.y, current.y)
 		const width = Math.abs(current.x - start.x)
 		const height = Math.abs(current.y - start.y)
+		if (type === 'spotlight') {
+			if (width < 1 || height < 1) { set({ drawingDraft: null }); return }
+			const object: SpotlightObject = { id: uid(), type, x: minX, y: minY, width, height }
+			get().applyChange({ id: uid(), label: 'Подсветка', op: { type: 'add', object } })
+			get().logObjectChange(object.id, 'Создано')
+			set({ drawingDraft: null, selectedId: object.id, tool: 'select' })
+			return
+		}
 		if (type === 'arrow') {
 			const mid = { x: (start.x + current.x) / 2, y: (start.y + current.y) / 2 }
 			const obj: ArrowObject = { id: uid(), type: 'arrow', start, control: mid, end: current, color: get().strokeColor, strokeWidth: get().strokeWidth }
@@ -498,10 +584,46 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			return
 		}
 	},
-	setStrokeColor: (c) => set({ strokeColor: c }),
+	setStrokeColor: (c) => {
+		set({ strokeColor: c })
+		void saveStrokeColor(c).catch(console.error)
+	},
+	setMarkerColor: (color) => {
+		const { selectedId, objects, tool, updateObjectLive, logObjectChange } = get()
+		const marker = tool === 'select' && objects.find(obj => obj.id === selectedId && obj.type === 'marker')
+		if (!marker) {
+			set({ markerColor: color })
+			return
+		}
+		updateObjectLive(marker.id, { color })
+		logObjectChange(marker.id, 'Цвет метки')
+	},
+	setMarkerNumberColor: (numberColor) => {
+		const { selectedId, objects, tool, updateObjectLive, logObjectChange } = get()
+		const marker = tool === 'select' ? objects.find(obj => obj.id === selectedId && obj.type === 'marker') : undefined
+		if (!marker) {
+			set({ markerNumberColor: numberColor })
+			return
+		}
+		if (marker.type !== 'marker' || marker.numberColor === numberColor) return
+		updateObjectLive(marker.id, { numberColor })
+		logObjectChange(marker.id, 'Цвет цифры')
+	},
 	setStrokeWidth: (w) => set({ strokeWidth: w }),
 	setMosaicBlockSize: (b) => set({ mosaicBlockSize: Math.max(2, Math.round(b)) }),
-	reset: () => set({ objects: [], selectedId: null, drawingDraft: null, history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, editingArrowId: null, editingArrowOriginal: null, scenes: [], activeSceneId: null }),
+	setObjectStyle: (id, style) => {
+		const { objects, objectHistories, logObjectChange, updateObjectLive } = get()
+		const object = objects.find(o => o.id === id)
+		if (!object) return
+		const changes = object.type === 'arrow' || object.type === 'rect'
+			? { color: style.color ?? object.color, strokeWidth: style.strokeWidth ?? object.strokeWidth }
+			: object.type === 'mosaic' ? { blockSize: style.blockSize ?? object.blockSize } : null
+		if (!changes || Object.entries(changes).every(([key, value]) => Reflect.get(object, key) === value)) return
+		if (!objectHistories[id]?.length) logObjectChange(id, 'Исходный стиль')
+		updateObjectLive(id, changes)
+		logObjectChange(id, 'Стиль элемента')
+	},
+	reset: () => set({ objects: [], selectedId: null, drawingDraft: null, cropDraft: null, history: [], historyIndex: -1, objectHistories: {}, objectHistoryIndex: {}, editingArrowId: null, editingArrowOriginal: null, scenes: [], activeSceneId: null, safarize: false, safariShadow: true }),
 	selectObject: (id) => set({ selectedId: id }),
 	updateArrowLive: (id, changes) => set({ objects: get().objects.map(o => o.id === id && o.type === 'arrow' ? { ...o, ...changes } : o) }),
 	updateObjectLive: (id, changes) => set({ objects: get().objects.map(o => o.id === id ? ({ ...o, ...changes }) as any : o) }),
@@ -520,4 +642,4 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 	setViewOffset: (x, y) => set({ viewOffsetX: x, viewOffsetY: y }),
 	stageRef: null,
 	setStageRef: (stage) => set({ stageRef: stage }),
-})) 
+}))

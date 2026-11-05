@@ -1,0 +1,77 @@
+.editor-text-dialog, .canvas-context-menu {
+  border: 1px solid #ffffff28;
+  border-radius: 8px;
+  background: #25262a;
+  color: #f3f4f6;
+  box-shadow: 0 12px 40px #0008;
+}
+.editor-text-dialog { width: min(360px, calc(100% - 24px)); padding: 16px; }
+.editor-text-dialog::backdrop { background: #0005; }
+.editor-text-dialog form { display: grid; gap: 12px; }
+.editor-text-dialog h2 { margin: 0; font-size: 16px; }
+.editor-text-dialog label { font-size: 13px; }
+.editor-text-dialog textarea, .editor-text-dialog input[type="number"] {
+  border: 1px solid #ffffff36;
+  border-radius: 6px;
+  background: #1c1d20;
+  color: inherit;
+  font: inherit;
+  padding: 6px 8px;
+}
+.editor-text-dialog textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  resize: vertical;
+  font-family: "Tilda Sans", system-ui, sans-serif;
+  font-weight: 600;
+}
+.editor-text-dialog input[type="number"] { width: 60px; }
+.editor-text-settings, .editor-text-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.editor-text-actions { justify-content: flex-end; }
+.editor-text-actions button {
+  border: 1px solid #ffffff28;
+  border-radius: 6px;
+  background: #33353a;
+  color: inherit;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.editor-text-actions button[type="submit"] { background: #2563eb; }
+.editor-text-actions button:disabled { opacity: .45; cursor: default; }
+.canvas-context-menu {
+  position: fixed;
+  z-index: 50;
+  width: min(230px, calc(100vw - 12px));
+  max-height: calc(100vh - 12px);
+  overflow-y: auto;
+  padding: 4px;
+}
+.canvas-context-menu button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.canvas-context-menu button:hover, .canvas-context-menu button:focus-visible { background: #3a414d; }
+.canvas-context-menu button[aria-checked="true"] { color: #a8c8ff; }
+.canvas-context-menu kbd { color: #b9bdc5; }
+.canvas-context-menu [role="separator"] { border-top: 1px solid #ffffff28; margin: 4px; }
+.editor-export-error { position: absolute; bottom: 12px; left: 12px; background: #492429; color: white; padding: 8px 12px; border-radius: 6px; }
+@font-face {
+  font-family: "Tilda Sans";
+  src: url("../assets/TildaSans-VF.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+}

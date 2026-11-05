@@ -13,6 +13,7 @@ export const HistoryPanel = memo(() => {
   const removeSelected = useEditorStore(s => s.removeSelected)
   const enterArrowEdit = useEditorStore(s => s.enterArrowEdit)
   const selectObject = useEditorStore(s => s.selectObject)
+  const setTool = useEditorStore(s => s.setTool)
 
   const [collapsed, setCollapsed] = useState<boolean>(true)
 
@@ -20,10 +21,14 @@ export const HistoryPanel = memo(() => {
     if (type === 'arrow') return `Стрелка`;
     if (type === 'rect') return `Рамка`;
     if (type === 'mosaic') return `Мозаика`;
+    if (type === 'text') return 'Текст';
+    if (type === 'spotlight') return 'Подсветка';
+    if (type === 'redact') return 'Скрытие данных';
     return `Элемент ${idx+1}`;
   }
 
   const onSelect = (id: string, type: string) => {
+    setTool('select')
     selectObject(id)
     if (type === 'arrow') enterArrowEdit(id)
   }
@@ -65,8 +70,8 @@ export const HistoryPanel = memo(() => {
           return (
             <div key={obj.id} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, overflow: 'hidden', background: isSel ? 'rgba(37,99,235,0.20)' : 'transparent' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px' }}>
-                <button onClick={() => onSelect(obj.id, obj.type)} style={{ flex: 1, textAlign: 'left', background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }} title="Выбрать элемент">
-                  {titleFor(obj.type, idx)}
+                <button onClick={() => onSelect(obj.id, obj.type)} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }} title={obj.type === 'text' ? obj.text : 'Выбрать элемент'}>
+                  {obj.type === 'marker' ? `Метка ${obj.number}` : obj.type === 'text' ? obj.text.split('\n')[0] : titleFor(obj.type, idx)}
                 </button>
                 <button onClick={() => undoObject(obj.id)} title="Отменить изменения" disabled={!canUndo} style={{ opacity: canUndo ? 1 : 0.5 }}>↶</button>
                 <button onClick={() => redoObject(obj.id)} title="Вернуть изменения" disabled={!canRedo} style={{ opacity: canRedo ? 1 : 0.5 }}>↷</button>
@@ -85,4 +90,4 @@ export const HistoryPanel = memo(() => {
       </div>
     </div>
   )
-}) 
+})

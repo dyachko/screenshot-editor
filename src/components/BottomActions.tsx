@@ -3,23 +3,34 @@ import { memo, useState } from 'react'
 interface BottomActionsProps {
   onExport: () => void | Promise<void>
   onCopy: () => Promise<boolean>
-  onDeleteAll?: () => void | Promise<void>
-  onExportAll?: () => void | Promise<void>
 }
 
-export const BottomActions = memo(({ onExport, onCopy, onDeleteAll, onExportAll }: BottomActionsProps) => {
+export const BottomActions = memo(({ onExport, onCopy }: BottomActionsProps) => {
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const runAction = async (action: () => void | Promise<void>) => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try { await action() }
+    catch (error) {
+      console.error(error)
+      setError('Не удалось выполнить действие. Попробуйте еще раз.')
+    } finally { setBusy(false) }
+  }
 
   const handleCopyClick = async () => {
     if (busy) return
     setBusy(true)
+    setError('')
     try {
       const ok = await onCopy()
       if (ok) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1500)
-      }
+      } else setError('Не удалось скопировать. Используйте экспорт PNG.')
     } finally {
       setBusy(false)
     }
@@ -35,6 +46,7 @@ export const BottomActions = memo(({ onExport, onCopy, onDeleteAll, onExportAll 
       justifyContent: 'center',
       pointerEvents: 'none',
     }}>
+      {error && <div role="alert" style={{ position: 'absolute', bottom: '100%', padding: 8, background: '#3b1717', color: '#fff' }}>{error}</div>}
       <div style={{
         display: 'inline-flex',
         gap: 0,
@@ -46,27 +58,7 @@ export const BottomActions = memo(({ onExport, onCopy, onDeleteAll, onExportAll 
         pointerEvents: 'auto',
         backdropFilter: 'blur(8px)'
       }}>
-        {onExportAll && (
-          <button onClick={onExportAll} style={{
-            padding: '10px 14px',
-            background: 'transparent',
-            color: '#22c55e',
-            border: 'none',
-            borderRight: '1px solid rgba(255,255,255,0.08)',
-            cursor: 'pointer'
-          }}>Экспорт всех</button>
-        )}
-        {onDeleteAll && (
-          <button onClick={onDeleteAll} style={{
-            padding: '10px 14px',
-            background: 'transparent',
-            color: '#f87171',
-            border: 'none',
-            borderRight: '1px solid rgba(255,255,255,0.08)',
-            cursor: 'pointer'
-          }}>Delete All</button>
-        )}
-        <button onClick={onExport} style={{
+        <button disabled={busy} onClick={() => runAction(onExport)} style={{
           padding: '10px 14px',
           background: '#3b82f6',
           color: 'white',
@@ -84,4 +76,4 @@ export const BottomActions = memo(({ onExport, onCopy, onDeleteAll, onExportAll 
       </div>
     </div>
   )
-}) 
+})

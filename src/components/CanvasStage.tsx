@@ -1,22 +1,52 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Image as KonvaImage, Circle as KCircle, Rect as KRect, Line as KLine, Text as KText } from 'react-konva'
+import { drawSafariFrame, safariToolbarHeight, SAFARI_PADDING, SAFARI_RADIUS } from '../services/safariFrame'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Stage, Layer, Shape, Group, Image as KonvaImage, Circle as KCircle, Rect as KRect, Line } from 'react-konva'
+import type { KonvaEventObject } from 'konva/lib/Node'
 import useImage from 'use-image'
-import { useEditorStore } from '../state/editorStore'
+import { getSceneCrop, MARKER_RADIUS, useEditorStore, type ImageBounds, type Point, type SceneObject, type TextObject } from '../state/editorStore'
+import { toolCommands } from '../state/toolCommands'
+import { drawMarker, drawRedaction, drawSpotlights, drawTextLabel, loadTextLabelFont, measureTextLabel } from '../services/annotations'
 import { ArrowShape } from './shapes/ArrowShape'
 import { RectOutlineShape } from './shapes/RectOutlineShape'
 import { MosaicShape } from './shapes/MosaicShape'
-import { SAFARI_FRAME } from '../constants/safariFrame'
+import { CanvasContextMenu } from './CanvasContextMenu'
+import { TextLabelDialog } from './TextLabelDialog'
+import { CropOverlay, cropHandles, type CropHandle } from './CropOverlay'
 
 interface CanvasStageProps {
   imageUrl: string | null
+  onExport: () => Promise<void>
 }
 
-export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
+export const CanvasStage = ({ imageUrl, onExport }: CanvasStageProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [img] = useImage(imageUrl ?? '', 'anonymous')
+  const [menuPoint, setMenuPoint] = useState<Point | null>(null)
+  const closeMenu = useCallback(() => setMenuPoint(null), [])
+  const [textTarget, setTextTarget] = useState<Point | TextObject | null>(null)
+  const [exportError, setExportError] = useState(false)
+  const [textContext] = useState(() => document.createElement('canvas').getContext('2d'))
+  const [textFontReady, setTextFontReady] = useState(false)
+  useEffect(() => {
+    let active = true
+    void loadTextLabelFont().then(() => { if (active) setTextFontReady(true) })
+    return () => { active = false }
+  }, [])
+  const saveText = useEditorStore(s => s.saveText)
 
   const objects = useEditorStore(s => s.objects)
+  const orderedObjects = useMemo(() => [
+    ...objects.filter(o => o.type === 'spotlight' || o.type === 'mosaic'),
+    ...objects.filter(o => o.type !== 'mosaic' && o.type !== 'redact' && o.type !== 'spotlight'),
+    ...objects.filter(o => o.type === 'redact'),
+  ], [objects])
+  const crop = useEditorStore(s => getSceneCrop(s.history, s.historyIndex))
+  const cropDraft = useEditorStore(s => s.cropDraft)
+  const setCropDraft = useEditorStore(s => s.setCropDraft)
+  const applyCropDraft = useEditorStore(s => s.applyCropDraft)
+  const cropDrag = useRef<{ handle: CropHandle; start: Point; bounds: ImageBounds; pointerId: number } | null>(null)
+  const safariAddress = useEditorStore(s => s.getActiveScene()?.snapshot.safariAddress)
   const draft = useEditorStore(s => s.drawingDraft)
   const startDrawing = useEditorStore(s => s.startDrawing)
   const updateDrawing = useEditorStore(s => s.updateDrawing)
@@ -29,7 +59,6 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const updateArrowLive = useEditorStore(s => s.updateArrowLive)
   const undo = useEditorStore(s => s.undo)
   const redo = useEditorStore(s => s.redo)
-  const editingArrowId = useEditorStore(s => s.editingArrowId)
   const exitArrowEdit = useEditorStore(s => s.exitArrowEdit)
   const removeSelected = useEditorStore(s => s.removeSelected)
   const updateObjectLive = useEditorStore(s => s.updateObjectLive)
@@ -41,12 +70,21 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
   const safarize = useEditorStore(s => s.safarize)
   const safariShadow = useEditorStore(s => s.safariShadow)
 
+  useEffect(() => {
+    cropDrag.current = null
+    const element = containerRef.current
+    if (!element) return
+    element.style.cursor = 'default'
+    if (tool === 'crop') element.focus({ preventScroll: true })
+  }, [tool])
+
   const setCursor = (cur: string) => { if (containerRef.current) containerRef.current.style.cursor = cur }
+  const arrowGrabOffset = useRef<Point>({ x: 0, y: 0 })
 
   // drag session for moving whole objects
   const dragRef = useRef<null | {
     id: string
-    type: 'arrow' | 'rect' | 'mosaic'
+    type: SceneObject['type']
     startImg: { x: number; y: number }
     origin: any
   }>(null)
@@ -77,9 +115,19 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     const onKey = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().includes('MAC')
       const mod = isMac ? e.metaKey : e.ctrlKey
-      const target = e.target as HTMLElement | null
-      const tag = target?.tagName?.toLowerCase()
-      const isEditable = !!(target && ((tag === 'input') || (tag === 'textarea') || (tag === 'select') || (target as any).isContentEditable))
+      const target = e.target instanceof HTMLElement ? e.target : null
+      if (e.defaultPrevented || e.isComposing || target?.closest('input, textarea, select, dialog') || target?.isContentEditable) return
+      if (!imageUrl) return
+      if (e.key === 'Escape') {
+        setTool('select')
+        return
+      }
+      if (e.key === 'Enter' && !target?.closest('button') && !mod) {
+        const state = useEditorStore.getState()
+        if (state.tool === 'crop') { e.preventDefault(); applyCropDraft(); return }
+        const obj = state.objects.find(o => o.id === state.selectedId)
+        if (obj?.type === 'text') { e.preventDefault(); setTextTarget(obj); return }
+      }
 
       // Undo/Redo
       if (mod && e.code === 'KeyZ') {
@@ -95,45 +143,46 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
       }
 
       // Delete
-      if (!isEditable && (e.key === 'Backspace' || e.key === 'Delete')) {
+      if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
         removeSelected()
         return
       }
 
       // Tool shortcuts (layout-independent)
-      if (!mod && !e.shiftKey && !e.altKey && !isEditable) {
-        if (e.code === 'KeyS') { setTool('select') }
-        if (e.code === 'KeyA') { setTool('arrow') }
-        if (e.code === 'KeyR') { setTool('rect') }
-        if (e.code === 'KeyM') { setTool('mosaic') }
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && !e.repeat) {
+        const command = toolCommands.find(command => e.code === `Key${command.key}`)
+        if (command) { e.preventDefault(); closeMenu(); setTool(command.tool) }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, removeSelected, setTool])
+  }, [undo, redo, removeSelected, setTool, imageUrl, closeMenu, applyCropDraft])
 
   const layout = useMemo(() => {
-    if (!img || size.width === 0 || size.height === 0) return null as null | {
-      scale: number; offsetX: number; offsetY: number; topBarH: number; outer: number; winX: number; winY: number; winW: number; winH: number; stageFromImage: (p: {x:number;y:number})=>{x:number;y:number}; imageFromStage: (p:{x:number;y:number})=>{x:number;y:number}
-    }
-    const iw = img.naturalWidth
-    const ih = img.naturalHeight
-    const topBarH = safarize ? SAFARI_FRAME.topBarHeight : 0
-    const outer = safarize ? (safariShadow ? SAFARI_FRAME.shadowPadding : SAFARI_FRAME.viewportPadding) : 0
-    const scale = Math.min((size.width - outer * 2) / iw, (size.height - topBarH - outer * 2) / ih)
+    if (!img || size.width === 0 || size.height === 0) return null
+    const bounds = (tool !== 'crop' && crop) || { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight }
+    const { width: iw, height: ih } = bounds
+    const framed = safarize && tool !== 'crop'
+    const pad = framed && safariShadow ? SAFARI_PADDING : 0
+    const toolbarHeight = framed ? safariToolbarHeight(iw) : 0
+    const margin = tool === 'crop' ? 14 : 0
+    const controlsHeight = tool === 'crop' ? 46 : 0
+    const scale = Math.max(0.001, Math.min((size.width - margin * 2) / (iw + pad * 2), (size.height - margin * 2 - controlsHeight) / (ih + toolbarHeight + pad * 2)))
+    const topBarH = toolbarHeight * scale
+    const outer = pad * scale
     const compW = iw * scale
     const compH = ih * scale + topBarH
     const winX = (size.width - compW) / 2
-    const winY = (size.height - compH) / 2
-    const offsetX = winX
-    const offsetY = winY + topBarH
+    const winY = (size.height + controlsHeight - compH) / 2
+    const offsetX = winX - bounds.x * scale
+    const offsetY = winY + topBarH - bounds.y * scale
     const winW = compW
     const winH = compH
     const stageFromImage = (p: { x: number; y: number }) => ({ x: offsetX + p.x * scale, y: offsetY + p.y * scale })
     const imageFromStage = (p: { x: number; y: number }) => ({ x: (p.x - offsetX) / scale, y: (p.y - offsetY) / scale })
-    return { scale, offsetX, offsetY, topBarH, outer, winX, winY, winW, winH, stageFromImage, imageFromStage }
-  }, [img, size.width, size.height, safarize, safariShadow])
+    return { scale, offsetX, offsetY, topBarH, outer, winX, winY, winW, winH, bounds, framed, stageFromImage, imageFromStage }
+  }, [img, size.width, size.height, safarize, safariShadow, crop, tool])
 
   useEffect(() => {
     if (layout) setViewScale(layout.scale)
@@ -171,25 +220,74 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
 
   const pickObjectAt = (pImg: { x: number; y: number }) => {
     // hit-test: check arrows (distance to curve), rects/mosaic by bounds, last-on-top
-    for (let i = objects.length - 1; i >= 0; i--) {
-      const o = objects[i]
+    for (let i = orderedObjects.length - 1; i >= 0; i--) {
+      const o = orderedObjects[i]
       if (o.type === 'arrow') {
         const nearCurve = distToQuad(o.start, o.control, o.end, pImg) < 8
         if (nearCurve) return o
+      } else if (o.type === 'marker') {
+        if (Math.hypot(pImg.x - o.x, pImg.y - o.y) <= MARKER_RADIUS) return o
+      } else if (o.type === 'text') {
+        if (!textFontReady || !textContext) continue
+        const { width, height } = measureTextLabel(textContext, o)
+        if (pImg.x >= o.x && pImg.x <= o.x + width && pImg.y >= o.y && pImg.y <= o.y + height) return o
       } else {
-        const within = pImg.x >= (o as any).x && pImg.x <= (o as any).x + (o as any).width && pImg.y >= (o as any).y && pImg.y <= (o as any).y + (o as any).height
+        const within = pImg.x >= o.x && pImg.x <= o.x + o.width && pImg.y >= o.y && pImg.y <= o.y + o.height
         if (within) return o
       }
     }
     return null
   }
 
-  const handlePointer = (e: any, kind: 'down' | 'move' | 'up') => {
+  const handlePointer = (e: KonvaEventObject<PointerEvent>, kind: 'down' | 'move' | 'up') => {
     if (!img || !layout) return
+    if (kind !== 'move' && (e.evt.button !== 0 || e.evt.ctrlKey)) return
     const stage = e.target.getStage()
-    const pos = stage.getPointerPosition()
+    const pos = stage?.getPointerPosition()
     if (!pos) return
     const p = layout.imageFromStage(pos)
+    const { bounds } = layout
+    const inside = p.x >= bounds.x && p.x < bounds.x + bounds.width && p.y >= bounds.y && p.y < bounds.y + bounds.height
+    if (tool === 'crop' && cropDraft) {
+      const activeDrag = cropDrag.current
+      const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+      if (activeDrag?.pointerId === e.evt.pointerId && kind !== 'down') {
+        const { start, handle, bounds: initial } = activeDrag
+        const dx = p.x - start.x, dy = p.y - start.y
+        const { x, y, width, height } = initial
+        if (handle === 'move') {
+          setCropDraft({ ...initial, x: clamp(x + dx, 0, bounds.width - width), y: clamp(y + dy, 0, bounds.height - height) })
+        } else {
+          const right = x + width, bottom = y + height
+          const left = handle.includes('w') ? clamp(x + dx, 0, right - 1) : x
+          const top = handle.includes('n') ? clamp(y + dy, 0, bottom - 1) : y
+          setCropDraft({ x: left, y: top,
+            width: (handle.includes('e') ? clamp(right + dx, x + 1, bounds.width) : right) - left,
+            height: (handle.includes('s') ? clamp(bottom + dy, y + 1, bounds.height) : bottom) - top,
+          })
+        }
+        if (kind === 'up') cropDrag.current = null
+        return
+      }
+      const { x, y, width, height } = cropDraft
+      let nearest = 14 / layout.scale
+      let handle: CropHandle | null = null
+      for (const [name, ax, ay] of cropHandles) {
+        const distance = Math.hypot(p.x - (x + width * ax), p.y - (y + height * ay))
+        if (distance < nearest) { nearest = distance; handle = name }
+      }
+      if (!handle && p.x >= x && p.x <= x + width && p.y >= y && p.y <= y + height) handle = 'move'
+      setCursor(handle === 'move' ? 'move' : handle ? `${handle}-resize` : 'default')
+      if (kind === 'down' && handle) {
+        cropDrag.current = { handle, start: p, bounds: cropDraft, pointerId: e.evt.pointerId }
+        if (e.evt.target instanceof Element) e.evt.target.setPointerCapture(e.evt.pointerId)
+      }
+      return
+    }
+    if (tool === 'text') {
+      if (kind === 'down' && inside) setTextTarget(p)
+      return
+    }
 
     if (tool === 'select') {
       // active dragging session
@@ -197,7 +295,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
         const { id, type, startImg, origin } = dragRef.current
         const dx = p.x - startImg.x
         const dy = p.y - startImg.y
-        if (type === 'rect' || type === 'mosaic') {
+        if (type !== 'arrow') {
           updateObjectLive(id, { x: origin.x + dx, y: origin.y + dy })
         } else if (type === 'arrow') {
           updateObjectLive(id, {
@@ -221,7 +319,7 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
       if (kind === 'down') {
         const target = e.target
         const isHandle = target.getClassName?.() === 'Circle'
-        const hit = pickObjectAt(p)
+        const hit = inside ? pickObjectAt(p) : null
         if (hit) {
           // select if needed
           if (selectedId !== hit.id) {
@@ -230,8 +328,8 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           } else if (!isHandle) {
             // start drag for whole object
             setCursor('move')
-            const origin = hit.type === 'arrow' ? { start: { ...(hit as any).start }, end: { ...(hit as any).end }, control: { ...(hit as any).control } } : { x: (hit as any).x, y: (hit as any).y }
-            dragRef.current = { id: hit.id, type: hit.type as any, startImg: p, origin }
+            const origin = hit.type === 'arrow' ? { start: hit.start, end: hit.end, control: hit.control } : { x: hit.x, y: hit.y }
+            dragRef.current = { id: hit.id, type: hit.type, startImg: p, origin }
           }
         } else {
           // click on empty space → deselect
@@ -255,9 +353,16 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
       return
     }
 
-    if (kind === 'down') startDrawing(p)
-    else if (kind === 'move') updateDrawing(p)
-    else commitDrawing()
+    const point = {
+      x: Math.max(bounds.x, Math.min(bounds.x + bounds.width, p.x)),
+      y: Math.max(bounds.y, Math.min(bounds.y + bounds.height, p.y)),
+    }
+    if (kind === 'down') { if (inside) startDrawing(point) }
+    else if (kind === 'move') updateDrawing(point)
+    else {
+      updateDrawing(point)
+      commitDrawing()
+    }
   }
 
   const constrainControlToMidPerpendicular = (start: {x:number;y:number}, end: {x:number;y:number}, point: {x:number;y:number}) => {
@@ -272,46 +377,34 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
     return { x: mx + nx * k, y: my + ny * k }
   }
 
-  const handleDragRectCorner = (obj: any, corner: 'tl'|'tr'|'bl'|'br') => (evt: any) => {
-    const pos = evt.target.getStage().getPointerPosition()
+  const handleDragRectCorner = (obj: { id: string; x: number; y: number; width: number; height: number }, corner: 'tl'|'tr'|'bl'|'br') => (evt: KonvaEventObject<DragEvent>) => {
+    const pos = evt.target.getStage()?.getPointerPosition()
     if (!pos || !layout) return
     const p = layout.imageFromStage(pos)
     let { x, y, width, height } = obj
-    if (corner === 'tl') { width = (x + width) - p.x; height = (y + height) - p.y; x = p.x; y = p.y }
-    if (corner === 'tr') { width = p.x - x; height = (y + height) - p.y; y = p.y }
-    if (corner === 'bl') { width = (x + width) - p.x; x = p.x; height = p.y - y }
-    if (corner === 'br') { width = p.x - x; height = p.y - y }
-    width = Math.max(1, width); height = Math.max(1, height)
+    const right = x + width, bottom = y + height
+    if (corner.endsWith('l')) { x = Math.min(p.x, right - 1); width = right - x }
+    else width = Math.max(1, p.x - x)
+    if (corner.startsWith('t')) { y = Math.min(p.y, bottom - 1); height = bottom - y }
+    else height = Math.max(1, p.y - y)
     updateObjectLive(obj.id, { x, y, width, height })
   }
 
-  const getSafariChrome = (l: NonNullable<typeof layout>) => {
-    const topY = l.winY + 8
-    const centerY = l.winY + l.topBarH / 2
-    const showSidebar = l.winW >= 270
-    const showNav = l.winW >= 360
-    const showRightTools = l.winW >= 900
-    const leftEdge = l.winX + (showNav ? 264 : showSidebar ? 172 : 82)
-    const rightEdge = l.winX + l.winW - (showRightTools ? 146 : 18)
-    const desiredAddressW = Math.min(536, Math.max(120, rightEdge - leftEdge))
-    const centeredAddressX = l.winX + (l.winW - desiredAddressW) / 2
-    const addressX = Math.max(leftEdge, Math.min(centeredAddressX, rightEdge - 40))
-    const addressW = Math.max(40, Math.min(desiredAddressW, rightEdge - addressX))
 
-    return {
-      topY,
-      centerY,
-      showSidebar,
-      showNav,
-      showRightTools,
-      addressX,
-      addressW,
-    }
+  const spotlightDraft = draft?.type === 'spotlight' ? {
+    x: Math.min(draft.start.x, draft.current.x), y: Math.min(draft.start.y, draft.current.y),
+    width: Math.abs(draft.start.x - draft.current.x), height: Math.abs(draft.start.y - draft.current.y),
+  } : null
+  const spotlights = objects.filter(o => o.type === 'spotlight')
+  const openContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!imageUrl) return
+    event.preventDefault()
+    setExportError(false)
+    setMenuPoint({ x: event.clientX, y: event.clientY })
   }
-
-
   return (
-    <div ref={containerRef} id="canvas-root" style={{ width: '100%', height: '100%', background: '#111', color: '#999', position: 'relative' }}>
+    <div ref={containerRef} id="canvas-root" onContextMenu={openContextMenu} tabIndex={-1}
+      style={{ width: '100%', height: '100%', background: '#111', color: '#999', position: 'relative', outline: 'none' }}>
       {!imageUrl && (
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
           <div style={{ textAlign: 'center', position: 'relative' }}>
@@ -330,128 +423,30 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
           onPointerDown={(e) => handlePointer(e, 'down')}
           onPointerMove={(e) => handlePointer(e, 'move')}
           onPointerUp={(e) => handlePointer(e, 'up')}
+          onPointerCancel={() => { cropDrag.current = null }}
+          onDblClick={event => {
+            if (tool !== 'select' || !layout) return
+            const point = event.target.getStage()?.getPointerPosition()
+            const obj = point && pickObjectAt(layout.imageFromStage(point))
+            if (obj && obj.type === 'text') setTextTarget(obj)
+          }}
         >
           <Layer>
-            {img && layout && safarize && (
-              <KRect
-                x={layout.winX}
-                y={layout.winY}
-                width={layout.winW}
-                height={layout.winH}
-                cornerRadius={SAFARI_FRAME.cornerRadius}
-                fill={'#ffffff'}
-                shadowEnabled={safariShadow}
-                shadowColor={'black'}
-                shadowOpacity={0.28}
-                shadowBlur={SAFARI_FRAME.shadowBlur}
-                shadowOffset={{ x: 0, y: SAFARI_FRAME.shadowOffsetY }}
-                listening={false}
-              />
+            {img && layout?.framed && (
+              <Shape listening={false} sceneFunc={context => {
+                const ctx = context._context
+                ctx.save()
+                ctx.translate(layout.winX, layout.winY)
+                ctx.scale(layout.scale, layout.scale)
+                drawSafariFrame(ctx, layout.bounds.width, layout.bounds.height, safariShadow, safariAddress)
+                ctx.restore()
+              }} />
             )}
-            {img && layout && safarize && (
-              <>
-                <KRect
-                  x={layout.winX}
-                  y={layout.winY}
-                  width={layout.winW}
-                  height={layout.topBarH}
-                  cornerRadius={[SAFARI_FRAME.cornerRadius, SAFARI_FRAME.cornerRadius, 0, 0] as any}
-                  fill={'#202127'}
-                  listening={false}
-                />
-                <KLine
-                  points={[layout.winX, layout.winY + layout.topBarH - 0.5, layout.winX + layout.winW, layout.winY + layout.topBarH - 0.5]}
-                  stroke={'rgba(255,255,255,0.08)'}
-                  strokeWidth={1}
-                  listening={false}
-                />
-                {(() => {
-                  const chrome = getSafariChrome(layout)
-                  if (!chrome.showNav) return null
-                  const x = layout.winX + 172
-                  const cy = chrome.centerY
-                  const muted = 'rgba(235,238,245,0.64)'
-                  const dim = 'rgba(235,238,245,0.32)'
-                  return (
-                    <>
-                      <KRect x={x} y={cy - 18} width={74} height={36} cornerRadius={18} fill={'#24262d'} stroke={'rgba(255,255,255,0.12)'} strokeWidth={1} listening={false} />
-                      <KLine points={[x + 26, cy - 7, x + 18, cy, x + 26, cy + 7]} stroke={muted} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
-                      <KLine points={[x + 49, cy - 7, x + 57, cy, x + 49, cy + 7]} stroke={dim} strokeWidth={2} lineCap={'round'} lineJoin={'round'} listening={false} />
-                      <KLine points={[x + 37, cy - 12, x + 37, cy + 12]} stroke={'rgba(255,255,255,0.08)'} strokeWidth={1} listening={false} />
-                    </>
-                  )
-                })()}
-                {(() => {
-                  const chrome = getSafariChrome(layout)
-                  const top = chrome.centerY
-                  const left = layout.winX + 18
-                  const r = 6
-                  const gap = 8
-                  return (
-                    <>
-                      <KCircle x={left} y={top} radius={r} fill={'#ff5f57'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
-                      <KCircle x={left + (r*2) + gap} y={top} radius={r} fill={'#febc2e'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
-                      <KCircle x={left + (r*2)*2 + gap*2} y={top} radius={r} fill={'#28c840'} stroke={'rgba(0,0,0,0.12)'} strokeWidth={1} listening={false} />
-                      {chrome.showSidebar && (
-                        <>
-                          <KRect x={layout.winX + 96} y={top - 18} width={68} height={36} cornerRadius={18} fill={'#24262d'} stroke={'rgba(255,255,255,0.14)'} strokeWidth={1} listening={false} />
-                          <KRect x={layout.winX + 111} y={top - 9} width={17} height={18} cornerRadius={3} stroke={'rgba(235,238,245,0.72)'} strokeWidth={1.3} listening={false} />
-                          <KLine points={[layout.winX + 117, top - 7, layout.winX + 117, top + 7]} stroke={'rgba(235,238,245,0.46)'} strokeWidth={1} listening={false} />
-                          <KLine points={[layout.winX + 134, top - 2, layout.winX + 139, top + 3, layout.winX + 144, top - 2]} stroke={'rgba(235,238,245,0.72)'} strokeWidth={1.5} lineCap={'round'} lineJoin={'round'} listening={false} />
-                        </>
-                      )}
-                    </>
-                  )
-                })()}
-                {(() => {
-                  const chrome = getSafariChrome(layout)
-                  const h = 30
-                  const w = chrome.addressW
-                  const x = chrome.addressX
-                  const y = chrome.topY
-                  return (
-                    <>
-                      <KRect x={x} y={y} width={w} height={h} cornerRadius={15} fill={'#24272f'} stroke={'rgba(255,255,255,0.16)'} strokeWidth={1} listening={false} />
-                      <KText x={x} y={y + 7} width={w} text={'screenshot.tilda'} fontFamily={'Inter, -apple-system, BlinkMacSystemFont, sans-serif'} fontStyle={'bold'} fontSize={12} fill={'rgba(255,255,255,0.88)'} align={'center'} listening={false} />
-                      {w > 132 && (
-                        <>
-                          <KRect x={x + 13} y={y + 9} width={11} height={12} cornerRadius={2} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.2} listening={false} />
-                          <KLine points={[x + 16, y + 14, x + 22, y + 14]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.2} lineCap={'round'} listening={false} />
-                        </>
-                      )}
-                      {w > 168 && (
-                        <>
-                          <KLine points={[x + w - 17, y + 9, x + w - 17, y + 21]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.4} lineCap={'round'} listening={false} />
-                          <KLine points={[x + w - 23, y + 15, x + w - 17, y + 21, x + w - 11, y + 15]} stroke={'rgba(235,238,245,0.62)'} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
-                        </>
-                      )}
-                    </>
-                  )
-                })()}
-                {(() => {
-                  const chrome = getSafariChrome(layout)
-                  if (!chrome.showRightTools) return null
-                  const cx = layout.winX + layout.winW - 28
-                  const cy = chrome.centerY
-                  const plus = 11
-                  const icon = 'rgba(235,238,245,0.76)'
-                  return (
-                    <>
-                      <KCircle x={cx - 110} y={cy} radius={8} stroke={icon} strokeWidth={1.4} listening={false} />
-                      <KLine points={[cx - 110, cy - 4, cx - 110, cy + 4]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
-                      <KLine points={[cx - 114, cy, cx - 106, cy]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
-                      <KRect x={cx - 80} y={cy - 5} width={12} height={13} cornerRadius={2} stroke={icon} strokeWidth={1.4} listening={false} />
-                      <KLine points={[cx - 74, cy - 10, cx - 74, cy + 1]} stroke={icon} strokeWidth={1.4} lineCap={'round'} listening={false} />
-                      <KLine points={[cx - 80, cy - 4, cx - 74, cy - 10, cx - 68, cy - 4]} stroke={icon} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
-                      <KLine points={[cx - 41, cy - plus/2, cx - 41, cy + plus/2]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
-                      <KLine points={[cx - 41 - plus/2, cy, cx - 41 + plus/2, cy]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
-                      <KLine points={[cx - plus/2, cy, cx + plus/2, cy]} stroke={icon} strokeWidth={2} lineCap={'round'} listening={false} />
-                      <KLine points={[cx - plus/2, cy - plus/2, cx + plus/2, cy - plus/2, cx + plus/2, cy + plus/2, cx - plus/2, cy + plus/2, cx - plus/2, cy - plus/2]} stroke={icon} strokeWidth={1.4} lineCap={'round'} lineJoin={'round'} listening={false} />
-                    </>
-                  )
-                })()}
-              </>
-            )}
+            <Group clipFunc={ctx => {
+              if (!img || !layout) { ctx.rect(0, 0, 0, 0); return }
+              const radius = layout.framed ? SAFARI_RADIUS * layout.scale : 0
+              ctx.roundRect(layout.winX, layout.winY + layout.topBarH, layout.winW, layout.winH - layout.topBarH, [0, 0, radius, radius])
+            }}>
             {img && layout && (
               // Image clipped with rounded bottom corners (top corners covered by toolbar)
               <>
@@ -461,42 +456,47 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                   y={layout.offsetY}
                   width={img.naturalWidth * layout.scale}
                   height={img.naturalHeight * layout.scale}
-                  cornerRadius={safarize ? [0,0,SAFARI_FRAME.cornerRadius,SAFARI_FRAME.cornerRadius] as any : 0}
+
                 />
-                {safarize && (
-                  <KRect
-                    x={layout.winX}
-                    y={layout.winY}
-                    width={layout.winW}
-                    height={layout.winH}
-                    cornerRadius={SAFARI_FRAME.cornerRadius}
-                    stroke={'rgba(0,0,0,0.18)'}
-                    strokeWidth={1}
-                    listening={false}
-                  />
-                )}
               </>
             )}
-            {img && layout && objects.map((obj) => {
+            {img && layout && objects.map(obj => obj.type === 'mosaic' && (
+              <MosaicShape key={obj.id} x={obj.x} y={obj.y} width={obj.width} height={obj.height}
+                blockSize={obj.blockSize} img={img} offsetX={layout.offsetX} offsetY={layout.offsetY}
+                scale={layout.scale} stageFromImage={layout.stageFromImage} />
+            ))}
+            {layout && (spotlights.length > 0 || (spotlightDraft && spotlightDraft.width > 0 && spotlightDraft.height > 0)) && (
+              <Shape listening={false} sceneFunc={context => {
+                const ctx = context._context
+                ctx.save()
+                ctx.translate(layout.offsetX, layout.offsetY)
+                ctx.scale(layout.scale, layout.scale)
+                drawSpotlights(ctx, layout.bounds, spotlightDraft ? [...spotlights, spotlightDraft] : spotlights)
+                ctx.restore()
+              }} />
+            )}
+            {img && layout && orderedObjects.map((obj) => {
               if (obj.type === 'arrow') return (
                 <ArrowShape key={obj.id} start={obj.start} control={obj.control} end={obj.end} color={obj.color} strokeWidth={obj.strokeWidth} stageFromImage={layout.stageFromImage} />
               )
               if (obj.type === 'rect') return (
                 <RectOutlineShape key={obj.id} x={obj.x} y={obj.y} width={obj.width} height={obj.height} color={obj.color} strokeWidth={obj.strokeWidth} stageFromImage={layout.stageFromImage} scale={layout.scale} />
               )
-              return (
-                <MosaicShape key={obj.id}
-                  x={obj.x} y={obj.y} width={obj.width} height={obj.height}
-                  blockSize={obj.blockSize}
-                  img={img}
-                  offsetX={layout.offsetX}
-                  offsetY={layout.offsetY}
-                  scale={layout.scale}
-                  stageFromImage={layout.stageFromImage}
-                />
+              if (obj.type === 'marker' || obj.type === 'redact' || obj.type === 'text') return (
+                <Shape key={obj.id} listening={false} sceneFunc={context => {
+                  const ctx = context._context
+                  ctx.save()
+                  ctx.translate(layout.offsetX, layout.offsetY)
+                  ctx.scale(layout.scale, layout.scale)
+                  if (obj.type === 'marker') drawMarker(ctx, obj)
+                  else if (obj.type === 'text') { if (textFontReady) drawTextLabel(ctx, obj) }
+                  else drawRedaction(ctx, obj)
+                  ctx.restore()
+                }} />
               )
+              return null
             })}
-            {img && layout && draft && (
+            {img && layout && draft && draft.type !== 'spotlight' && (
               draft.type === 'arrow' ? (
                 <ArrowShape start={draft.start} control={{ x: (draft.start.x + draft.current.x)/2, y: (draft.start.y + draft.current.y)/2 }} end={draft.current} color={useEditorStore.getState().strokeColor} strokeWidth={useEditorStore.getState().strokeWidth} stageFromImage={layout.stageFromImage} />
               ) : draft.type === 'rect' ? (
@@ -510,27 +510,47 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                   const tl = layout.stageFromImage({ x, y })
                   return (
                     <KRect x={tl.x} y={tl.y} width={w * layout.scale} height={h * layout.scale}
-                      stroke="#F99761" strokeWidth={1.5} dash={[6,4]} fill="rgba(249,151,97,0.12)" />
+                      stroke="#F99761" strokeWidth={1.5} dash={[6,4]}
+                      fill="rgba(90,150,255,0.12)" />
                   )
                 })()
               )
             )}
-            {img && layout && objects.map(obj => {
-              if (obj.type !== 'arrow') return null
+            </Group>
+            {layout && tool === 'crop' && cropDraft && (
+              <CropOverlay crop={cropDraft} image={layout.bounds} project={layout.stageFromImage} scale={layout.scale} />
+            )}
+            {img && layout && tool === 'select' && objects.map(obj => {
+              if (obj.type !== 'arrow' || selectedId !== obj.id) return null
               const s = layout.stageFromImage(obj.start)
               const e = layout.stageFromImage(obj.end)
-              const c = layout.stageFromImage(obj.control)
-              const handleDrag = (kind: 'start'|'control'|'end') => (evt: any) => {
-                const pos = evt.target.getStage().getPointerPosition()
+              const control = layout.stageFromImage(obj.control)
+              const mid = { x: (s.x + 2 * control.x + e.x) / 4, y: (s.y + 2 * control.y + e.y) / 4 }
+              const tx = e.x - control.x
+              const ty = e.y - control.y
+              const tangentLength = Math.hypot(tx, ty)
+              const tipHandle = {
+                x: e.x + 14 * (tangentLength ? tx / tangentLength : 1),
+                y: e.y + 14 * (tangentLength ? ty / tangentLength : 0),
+              }
+              const handleDrag = (kind: 'start'|'control'|'end') => (evt: KonvaEventObject<DragEvent>) => {
+                const pos = kind === 'control' ? evt.target.position() : evt.target.getStage()?.getPointerPosition()
                 if (!pos) return
                 const p = layout.imageFromStage(pos)
                 const latest = useEditorStore.getState().objects.find(o => o.id === obj.id && o.type === 'arrow') as typeof obj | undefined
                 if (!latest) return
                 if (kind === 'control') {
-                  const constrained = constrainControlToMidPerpendicular(latest.start, latest.end, p)
+                  // At t = 0.5 the control point contributes half the position.
+                  const desiredControl = {
+                    x: 2 * p.x - (latest.start.x + latest.end.x) / 2,
+                    y: 2 * p.y - (latest.start.y + latest.end.y) / 2,
+                  }
+                  const constrained = constrainControlToMidPerpendicular(latest.start, latest.end, desiredControl)
                   updateArrowLive(obj.id, { control: constrained })
                   return
                 }
+                p.x -= arrowGrabOffset.current.x
+                p.y -= arrowGrabOffset.current.y
                 // Dragging endpoints: preserve curvature scalar along normal
                 const prevS = latest.start
                 const prevE = latest.end
@@ -550,54 +570,86 @@ export const CanvasStage = ({ imageUrl }: CanvasStageProps) => {
                 const nnx = -ndy / nlen
                 const nny = ndx / nlen
                 const newControl = { x: newMid.x + nnx * kOld, y: newMid.y + nny * kOld }
-                updateArrowLive(obj.id, { start: newS, end: newE, control: newControl } as any)
+                updateArrowLive(obj.id, { start: newS, end: newE, control: newControl })
               }
-              const handleDown = () => { selectObject(obj.id); beginArrowEdit(obj.id) }
-              const handleUp = () => finishArrowEdit(obj.id)
-              const isEditing = editingArrowId === obj.id || selectedId === obj.id
+              const handleDown = (anchor?: Point) => (evt: KonvaEventObject<PointerEvent>) => {
+                evt.cancelBubble = true
+                beginArrowEdit(obj.id)
+                const pointer = evt.target.getStage()?.getPointerPosition()
+                if (!pointer || !anchor) return
+                const p = layout.imageFromStage(pointer)
+                arrowGrabOffset.current = { x: p.x - anchor.x, y: p.y - anchor.y }
+              }
+              const handleStyle = {
+                draggable: true, stroke: '#80390f', strokeWidth: 1.5, hitStrokeWidth: 14,
+                onDragEnd: () => finishArrowEdit(obj.id),
+                onPointerEnter: () => setCursor('grab'),
+                onPointerLeave: () => setCursor('default'),
+              }
               return (
-                <>
-                  {isEditing && (
-                    <>
-                      <KCircle key={obj.id+'-hs'} x={s.x} y={s.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('start')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                      <KCircle key={obj.id+'-hc'} x={c.x} y={c.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('control')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                      <KCircle key={obj.id+'-he'} x={e.x} y={e.y} radius={6} fill="#F99761" stroke="white" strokeWidth={2}
-                        draggable onDragStart={handleDown} onDragMove={handleDrag('end')} onDragEnd={handleUp} onPointerDown={handleDown}
-                        onPointerEnter={() => setCursor('pointer')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={20} />
-                    </>
-                  )}
-                </>
+                <Group key={obj.id}>
+                  <Line points={[e.x, e.y, tipHandle.x, tipHandle.y]} dash={[2, 2]} stroke="#80390f" listening={false} />
+                  <KCircle {...handleStyle} x={s.x} y={s.y} radius={4} fill="white"
+                    onPointerDown={handleDown(obj.start)} onDragMove={handleDrag('start')} />
+                  <KCircle {...handleStyle} x={tipHandle.x} y={tipHandle.y} radius={4} fill="white"
+                    onPointerDown={handleDown(obj.end)} onDragMove={handleDrag('end')} />
+                  <KRect {...handleStyle} x={mid.x} y={mid.y} width={9} height={9} offsetX={4.5} offsetY={4.5}
+                    rotation={45} fill="#ffd6b9" onPointerDown={handleDown()} onDragMove={handleDrag('control')}
+                    dragBoundFunc={pos => constrainControlToMidPerpendicular(s, e, pos)} />
+                </Group>
               )
             })}
             {img && layout && objects.map(obj => {
-              if (obj.type !== 'rect' && obj.type !== 'mosaic') return null
+              if (obj.type === 'marker' && selectedId === obj.id && tool === 'select') {
+                return <KCircle key={obj.id} {...layout.stageFromImage(obj)} radius={MARKER_RADIUS * layout.scale + 3} stroke="#5a96ff" strokeWidth={1.5} listening={false} />
+              }
+              if (obj.type === 'text' && selectedId === obj.id && textFontReady && textContext) {
+                const { width, height } = measureTextLabel(textContext, obj)
+                return <KRect key={obj.id} {...layout.stageFromImage(obj)} width={width * layout.scale} height={height * layout.scale}
+                  stroke="#5a96ff" dash={[4, 3]} strokeWidth={1.5} listening={false} />
+              }
+              if (obj.type !== 'rect' && obj.type !== 'mosaic' && obj.type !== 'redact' && obj.type !== 'spotlight') return null
               if (selectedId !== obj.id) return null
               const tl = layout.stageFromImage({ x: obj.x, y: obj.y })
               const tr = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y })
               const bl = layout.stageFromImage({ x: obj.x, y: obj.y + obj.height })
               const br = layout.stageFromImage({ x: obj.x + obj.width, y: obj.y + obj.height })
               const r = 8
+              const handleProps = {
+                radius: r, fill: '#F99761', stroke: 'white', strokeWidth: 2, draggable: true, hitStrokeWidth: 24,
+                onPointerDown: (event: KonvaEventObject<PointerEvent>) => { event.cancelBubble = true },
+                onPointerLeave: () => setCursor('default'),
+                onDragEnd: () => logObjectChange(obj.id, 'Изменено'),
+              }
               return (
-                <>
+                <Group key={obj.id}>
                   <KRect x={tl.x} y={tl.y} width={obj.width * layout.scale} height={obj.height * layout.scale} stroke="#F99761" strokeWidth={1} dash={[6,4]} listening={false} />
-                  <KCircle x={tl.x} y={tl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={tr.x} y={tr.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'tr')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={bl.x} y={bl.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'bl')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nesw-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                  <KCircle x={br.x} y={br.y} radius={r} fill="#F99761" stroke="white" strokeWidth={2} draggable onDragMove={handleDragRectCorner(obj, 'br')} onDragEnd={() => logObjectChange(obj.id, 'Изменено')}
-                    onPointerEnter={() => setCursor('nwse-resize')} onPointerLeave={() => setCursor('default')} hitStrokeWidth={24} />
-                </>
+                  <KCircle {...handleProps} x={tl.x} y={tl.y} onDragMove={handleDragRectCorner(obj, 'tl')} onPointerEnter={() => setCursor('nwse-resize')} />
+                  <KCircle {...handleProps} x={tr.x} y={tr.y} onDragMove={handleDragRectCorner(obj, 'tr')} onPointerEnter={() => setCursor('nesw-resize')} />
+                  <KCircle {...handleProps} x={bl.x} y={bl.y} onDragMove={handleDragRectCorner(obj, 'bl')} onPointerEnter={() => setCursor('nesw-resize')} />
+                  <KCircle {...handleProps} x={br.x} y={br.y} onDragMove={handleDragRectCorner(obj, 'br')} onPointerEnter={() => setCursor('nwse-resize')} />
+                </Group>
               )
             })}
           </Layer>
         </Stage>
       )}
+      {img && tool === 'crop' && cropDraft && (
+        <div className="crop-controls" role="group" aria-label="Кадрирование">
+          <output>{Math.round(cropDraft.width)} × {Math.round(cropDraft.height)}</output>
+          <button type="button" onClick={() => setCropDraft({ x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight })}>Весь снимок</button>
+          <button type="button" onClick={() => { cropDrag.current = null; setTool('select'); setCursor('default') }}>Отмена</button>
+          <button type="button" onClick={() => { cropDrag.current = null; applyCropDraft(); setCursor('default') }}>Применить</button>
+        </div>
+      )}
+      {textTarget && (
+        <TextLabelDialog initial={'id' in textTarget ? textTarget : undefined}
+          onClose={() => setTextTarget(null)}
+          onSave={style => { saveText('id' in textTarget ? textTarget.id : textTarget, style); setTextTarget(null) }} />
+      )}
+      {menuPoint && <CanvasContextMenu point={menuPoint} tool={tool} onTool={setTool} onClose={closeMenu}
+        onExport={() => { void onExport().catch(error => { console.error(error); setExportError(true) }) }} />}
+      {exportError && <div className="editor-export-error" role="alert">Не удалось экспортировать PNG.</div>}
     </div>
   )
-} 
+}

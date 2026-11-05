@@ -20,8 +20,8 @@ export function RectOutlineShape({ x, y, width, height, color, strokeWidth, stag
 			width={Math.max(0, width * scale)}
 			height={Math.max(0, height * scale)}
 			stroke={color}
-			strokeWidth={strokeWidth}
+			strokeWidth={strokeWidth * scale}
 			fillEnabled={false}
 		/>
 	)
-} 
+}
